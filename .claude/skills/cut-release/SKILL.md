@@ -82,9 +82,3 @@ Someone deciding whether to upgrade, and someone debugging after they did. So:
   normalises terminators".
 - No agent names, no audit process, no counts of how many things were found.
   `docs/comment-policy.md` bans that in comments and it reads no better here.
-
-## `server.json`
-
-Not touched by the bump script. It describes a published `.mcpb` with a checksum,
-so it moves only when the release is actually cut: version, identifier URL, and
-`fileSha256` from the artifact that was uploaded.
