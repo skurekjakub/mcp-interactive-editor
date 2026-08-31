@@ -28586,13 +28586,42 @@ var FsGuard = class {
   roots;
   dryRun;
   deny;
+  canonicalRoots;
   constructor(options) {
     if (options.roots.length === 0) {
-      throw new Error("mcp-interactive-editor needs at least one --root. Refusing to start with none.");
+      throw new Error(
+        "mcp-interactive-editor needs at least one --root. Refusing to start with none."
+      );
     }
     this.roots = options.roots.map((r2) => resolve(r2));
     this.deny = options.deny.map((d2) => d2.toLowerCase());
     this.dryRun = options.dryRun;
+  }
+  /**
+   * Roots have to be canonicalised the same way targets are, or containment
+   * compares two different spellings of the same directory and refuses
+   * everything. Two real cases: Windows hands out 8.3 short paths for temp
+   * directories (`RUNNER~1`) that `realpath` expands, and macOS resolves `/tmp`
+   * and `/var` into `/private`. Configure a root by either spelling and every
+   * write would be rejected as "outside the roots".
+   *
+   * Resolved once, lazily, because the constructor cannot await. A root that
+   * does not exist keeps its configured form — it simply will not match
+   * anything until it does.
+   */
+  async resolveRoots() {
+    if (!this.canonicalRoots) {
+      this.canonicalRoots = await Promise.all(
+        this.roots.map(async (root) => {
+          try {
+            return await realpath(root);
+          } catch {
+            return root;
+          }
+        })
+      );
+    }
+    return this.canonicalRoots;
   }
   /**
    * Resolve a requested path against the roots.
@@ -28611,14 +28640,15 @@ var FsGuard = class {
       exists: false
     });
     if (requested.trim() === "") return rejected();
-    const candidate = isAbsolute(requested) ? resolve(requested) : resolve(this.roots[0], requested);
+    const roots = await this.resolveRoots();
+    const candidate = isAbsolute(requested) ? resolve(requested) : resolve(roots[0], requested);
     let real;
     try {
       real = await realpathDeepest(candidate);
     } catch {
       return rejected();
     }
-    const root = this.roots.find((r2) => contains(r2, real)) ?? null;
+    const root = roots.find((r2) => contains(r2, real)) ?? null;
     if (!root) return rejected();
     const rel = relative(root, real);
     if (this.isDenied(rel)) return rejected();

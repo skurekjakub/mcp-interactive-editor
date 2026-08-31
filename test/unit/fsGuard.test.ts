@@ -122,6 +122,34 @@ describe("symlinks", () => {
     expect(target.absolute).toBeNull();
     await rm(link, { force: true });
   });
+
+  /**
+   * Regression: the roots have to be canonicalised the same way targets are.
+   * When they were not, a root configured by any non-canonical spelling matched
+   * nothing and the guard refused every write in it. Real cases are Windows 8.3
+   * temp paths and macOS resolving /tmp into /private/tmp — this reproduces the
+   * shape with a symlink, which is the same mismatch.
+   */
+  it("accepts a root given by a path that realpath rewrites", async ({ skip }) => {
+    const linkedRoot = join(resolve(root, ".."), "root-by-another-name");
+    try {
+      await symlink(root, linkedRoot, "junction");
+    } catch {
+      skip();
+      return;
+    }
+
+    const viaLink = new FsGuard({ roots: [linkedRoot], deny: DEFAULT_DENY, dryRun: false });
+    const target = await viaLink.describe(join(linkedRoot, "inside.txt"));
+
+    expect(
+      target.absolute,
+      "a root behind a symlink must still contain its own files",
+    ).toBeTruthy();
+    expect(target.exists).toBe(true);
+
+    await rm(linkedRoot, { force: true, recursive: false });
+  });
 });
 
 describe("writing", () => {

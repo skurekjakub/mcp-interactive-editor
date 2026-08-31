@@ -48,6 +48,7 @@ export class FsGuard {
   readonly roots: string[];
   readonly dryRun: boolean;
   private readonly deny: string[];
+  private canonicalRoots?: string[];
 
   constructor(options: GuardOptions) {
     if (options.roots.length === 0) {
@@ -58,6 +59,33 @@ export class FsGuard {
     this.roots = options.roots.map((r) => resolve(r));
     this.deny = options.deny.map((d) => d.toLowerCase());
     this.dryRun = options.dryRun;
+  }
+
+  /**
+   * Roots have to be canonicalised the same way targets are, or containment
+   * compares two different spellings of the same directory and refuses
+   * everything. Two real cases: Windows hands out 8.3 short paths for temp
+   * directories (`RUNNER~1`) that `realpath` expands, and macOS resolves `/tmp`
+   * and `/var` into `/private`. Configure a root by either spelling and every
+   * write would be rejected as "outside the roots".
+   *
+   * Resolved once, lazily, because the constructor cannot await. A root that
+   * does not exist keeps its configured form — it simply will not match
+   * anything until it does.
+   */
+  private async resolveRoots(): Promise<string[]> {
+    if (!this.canonicalRoots) {
+      this.canonicalRoots = await Promise.all(
+        this.roots.map(async (root) => {
+          try {
+            return await realpath(root);
+          } catch {
+            return root;
+          }
+        }),
+      );
+    }
+    return this.canonicalRoots;
   }
 
   /**
@@ -79,11 +107,11 @@ export class FsGuard {
 
     if (requested.trim() === "") return rejected();
 
+    const roots = await this.resolveRoots();
+
     // Relative paths are interpreted against the first root, which is the only
     // sensible reading of "write to src/foo.ts" when several roots exist.
-    const candidate = isAbsolute(requested)
-      ? resolve(requested)
-      : resolve(this.roots[0], requested);
+    const candidate = isAbsolute(requested) ? resolve(requested) : resolve(roots[0], requested);
 
     let real: string;
     try {
@@ -92,7 +120,7 @@ export class FsGuard {
       return rejected();
     }
 
-    const root = this.roots.find((r) => contains(r, real)) ?? null;
+    const root = roots.find((r) => contains(r, real)) ?? null;
     if (!root) return rejected();
 
     const rel = relative(root, real);
