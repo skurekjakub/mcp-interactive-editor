@@ -4,8 +4,10 @@ import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, createProposal } from "../proposals.js";
 import { VIEW_URI, type ToolContext } from "./context.js";
 import { openedFileResult } from "./results.js";
+import { waitForReview } from "./awaitReview.js";
 
-export function registerOpenFile(server: McpServer, { guard }: ToolContext): void {
+export function registerOpenFile(server: McpServer, context: ToolContext): void {
+  const { guard } = context;
   registerAppTool(
     server,
     "open_file",
@@ -40,7 +42,8 @@ export function registerOpenFile(server: McpServer, { guard }: ToolContext): voi
       });
       // Deliberately not openerResult: opening a file to read it yourself should
       // not report it back as a diff either.
-      return openedFileResult(buildEditorState(guard, proposal));
+      const opened = openedFileResult(buildEditorState(guard, proposal));
+      return waitForReview(context, proposal.proposalId, opened);
     },
   );
 }

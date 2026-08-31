@@ -4,8 +4,11 @@ import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, createProposal } from "../proposals.js";
 import { VIEW_URI, type ToolContext } from "./context.js";
 import { openerResult } from "./results.js";
+import { waitForReview } from "./awaitReview.js";
 
-export function registerProposeWrite(server: McpServer, { guard }: ToolContext): void {
+export function registerProposeWrite(server: McpServer, context: ToolContext): void {
+  const { guard } = context;
+
   registerAppTool(
     server,
     "propose_write",
@@ -13,9 +16,11 @@ export function registerProposeWrite(server: McpServer, { guard }: ToolContext):
       title: "Propose a file write",
       description:
         "Open an editable review panel for writing a file. Shows the human a diff against what is " +
-        "on disk, lets them edit your proposed content directly, and waits for them to press the " +
-        "button. This tool NEVER writes anything itself — it only opens the editor. Use it for every " +
-        "file write instead of writing directly. Returns the diff so you can see what you proposed.",
+        "on disk, lets them edit your proposed content directly, and waits for them to decide. " +
+        "This tool NEVER writes anything itself. It does not return until they act: either they " +
+        "accept it and the result is a receipt for what landed, or they comment on it, which is a " +
+        "rejection — nothing is written and the result carries what they want changed, for you to " +
+        "redraft and propose again.",
       inputSchema: {
         path: z
           .string()
@@ -37,7 +42,8 @@ export function registerProposeWrite(server: McpServer, { guard }: ToolContext):
         mode: target.exists ? "overwrite" : "create",
         rationale,
       });
-      return openerResult(buildEditorState(guard, proposal));
+      const opened = openerResult(buildEditorState(guard, proposal));
+      return waitForReview(context, proposal.proposalId, opened);
     },
   );
 }

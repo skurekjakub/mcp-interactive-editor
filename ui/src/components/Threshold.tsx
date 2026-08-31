@@ -6,6 +6,11 @@ interface ThresholdProps {
   onAck: (next: boolean) => void;
   isDelete: boolean;
   blocked: boolean;
+  /**
+   * Any comment at all means the draft is being declined, so committing is not
+   * the thing being asked for. The two are exclusive on purpose.
+   */
+  hasComments: boolean;
   busy: boolean;
   /** False when the path itself was refused; there is nothing to commit to. */
   writable: boolean;
@@ -26,6 +31,7 @@ export function Threshold({
   onAck,
   isDelete,
   blocked,
+  hasComments,
   busy,
   writable,
   unchanged,
@@ -61,9 +67,15 @@ export function Threshold({
           className={`commit${isDelete ? " commit-danger" : ""}`}
           type="button"
           onClick={onCommit}
-          disabled={blocked || busy || unchanged || !writable}
+          disabled={blocked || busy || unchanged || !writable || hasComments}
         >
-          {busy ? "Working…" : unchanged ? "No changes to save" : label}
+          {busy
+            ? "Working…"
+            : hasComments
+              ? "Send the comments instead"
+              : unchanged
+                ? "No changes to save"
+                : label}
         </button>
       </div>
     </div>

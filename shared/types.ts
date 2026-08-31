@@ -80,6 +80,22 @@ export interface ProposalHandle {
   refused?: boolean;
 }
 
+/**
+ * How a review ended.
+ *
+ * The editor is a gate, not a viewer, so the tool call that opened it does not
+ * return until one of these happens. Comments and a commit are deliberately
+ * exclusive: saying something about a draft is the same as declining it, and the
+ * agent is told to redraft rather than being told the write went through with
+ * remarks attached to it.
+ */
+export type ReviewOutcome =
+  | { kind: "committed"; receipt: CommitReceipt }
+  | { kind: "changes-requested"; message: string }
+  | { kind: "discarded"; reason?: string }
+  /** The panel never answered — no host to render it, or nobody came back. */
+  | { kind: "unanswered"; why: string };
+
 export type DiffLineKind = "equal" | "add" | "remove";
 
 export interface DiffLine {

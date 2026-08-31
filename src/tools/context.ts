@@ -24,6 +24,17 @@ export interface ToolContext {
   canRenderPanel: () => boolean;
   /** True when `--terminal-approval` was passed and the client's prompt is the gate. */
   terminalApproval: boolean;
+  /**
+   * How long an opening tool call waits for the human before giving up. The wait
+   * is the point — the agent learns what happened to its draft in the result of
+   * the call it already made — but a walked-away review has to end eventually.
+   */
+  reviewTimeoutMs: number;
+  /**
+   * How long to wait for a panel to attach before concluding this host is not
+   * going to show one, whatever it advertised at initialize.
+   */
+  reviewGraceMs: number;
 }
 
 /** The View every editor-opening tool points at. */

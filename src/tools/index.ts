@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { RESOURCE_MIME_TYPE, getUiCapability } from "@modelcontextprotocol/ext-apps/server";
 import type { FsGuard } from "../fsGuard.js";
+import { REVIEW_GRACE_MS, REVIEW_TIMEOUT_MS } from "../review.js";
 import type { ToolContext } from "./context.js";
 import { registerEditorView } from "./view.js";
 import { registerProposeWrite } from "./proposeWrite.js";
@@ -10,6 +11,8 @@ import { registerEditorAttach } from "./editorAttach.js";
 import { registerEditorUpdate } from "./editorUpdate.js";
 import { registerEditorCommit } from "./editorCommit.js";
 import { registerEditorDiscard } from "./editorDiscard.js";
+import { registerEditorRequestChanges } from "./editorRequestChanges.js";
+import { registerEditorPending } from "./editorPending.js";
 import { registerReadFile } from "./readFile.js";
 import { registerListRoots } from "./listRoots.js";
 
@@ -44,6 +47,10 @@ export interface ToolOptions {
    * render the panel is refused a commit outright rather than trusted.
    */
   terminalApproval?: boolean;
+  /** How long an opening call waits for the human. Defaults to REVIEW_TIMEOUT_MS. */
+  reviewTimeoutMs?: number;
+  /** How long to wait for a panel to attach. Defaults to REVIEW_GRACE_MS. */
+  reviewGraceMs?: number;
 }
 
 export function registerTools(
@@ -55,6 +62,8 @@ export function registerTools(
     guard,
     commitVisibility: options.commitVisibility,
     terminalApproval: options.terminalApproval ?? false,
+    reviewTimeoutMs: options.reviewTimeoutMs ?? REVIEW_TIMEOUT_MS,
+    reviewGraceMs: options.reviewGraceMs ?? REVIEW_GRACE_MS,
     canRenderPanel: () => hostRendersPanel(server),
   };
 
@@ -70,6 +79,8 @@ export function registerTools(
   registerEditorUpdate(server, context);
   registerEditorCommit(server, context);
   registerEditorDiscard(server, context);
+  registerEditorRequestChanges(server, context);
+  registerEditorPending(server, context);
 
   // Read-only helpers, safe for both callers.
   registerReadFile(server, context);

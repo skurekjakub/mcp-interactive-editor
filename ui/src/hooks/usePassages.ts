@@ -2,14 +2,11 @@ import { useCallback, useState } from "react";
 import {
   annotatePassage,
   attachPassage,
-  describePassages,
   quotePassages,
   type Passage,
 } from "../../../shared/passages.js";
 import type { Bridge } from "../bridge.js";
 import { messageOf } from "../lib/results.js";
-
-const SENT_NOTICE_MS = 4000;
 
 export interface PassageTray {
   /** The live selection, not yet pinned. */
@@ -22,28 +19,32 @@ export interface PassageTray {
   clear: () => void;
   send: (note: string) => Promise<void>;
   sending: boolean;
-  sent: string | null;
-  /** Whether there is anything worth showing the bar for. */
+  /** Set once the comments have gone back and the draft has been declined. */
+  rejected: boolean;
+  /** Whether there is anything worth showing the tray for. */
   active: boolean;
 }
 
 /**
- * Regions of the panel on their way to the chat.
+ * Regions of the panel, and what is being asked about each, on their way back to
+ * the agent.
  *
- * Sending is `ui/message`, which starts a normal turn — so the answer arrives in
- * the conversation, next to the panel, rather than inside it. Several regions
- * can stack into one message: pointing at two things and asking how they relate
- * is a question you cannot ask one quote at a time.
+ * Sending is not a chat message. It resolves the tool call that opened this
+ * panel and is still waiting on it, which is what makes one button press finish
+ * the job rather than leaving a draft sitting in a composer for someone to send
+ * a second time. It is also a rejection: commenting on a draft declines it, so
+ * nothing is written and the agent is handed the words to redraft from.
  */
 export function usePassages(
   bridge: Bridge | null,
+  proposalId: string | undefined,
   display: string | undefined,
   onFailure: (message: string | null) => void,
 ): PassageTray {
   const [pending, setPending] = useState<Passage | null>(null);
   const [passages, setPassages] = useState<Passage[]>([]);
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState<string | null>(null);
+  const [rejected, setRejected] = useState(false);
 
   const pin = useCallback((next: Passage) => {
     setPassages((current) => attachPassage(current, next));
@@ -66,7 +67,7 @@ export function usePassages(
 
   const send = useCallback(
     async (note: string) => {
-      if (!bridge || !display) return;
+      if (!bridge || !display || !proposalId) return;
       // Whatever is still highlighted counts as selected, so a single region
       // needs no trip through the + button before it can be sent.
       const outgoing = pending ? attachPassage(passages, pending) : passages;
@@ -75,17 +76,25 @@ export function usePassages(
       setSending(true);
       onFailure(null);
       try {
-        await bridge.sendMessage(quotePassages(display, outgoing, note));
+        const result = await bridge.callTool("editor_request_changes", {
+          proposalId,
+          message: quotePassages(display, outgoing, note),
+        });
+
+        if (result.isError) {
+          onFailure(textOf(result));
+          return;
+        }
+
         clear();
-        setSent(`Sent ${describePassages(outgoing)} to Claude.`);
-        window.setTimeout(() => setSent(null), SENT_NOTICE_MS);
+        setRejected(true);
       } catch (cause) {
         onFailure(messageOf(cause));
       } finally {
         setSending(false);
       }
     },
-    [bridge, display, passages, pending, clear, onFailure],
+    [bridge, proposalId, display, passages, pending, clear, onFailure],
   );
 
   return {
@@ -98,7 +107,14 @@ export function usePassages(
     clear,
     send,
     sending,
-    sent,
+    rejected,
     active: pending !== null || passages.length > 0,
   };
+}
+
+function textOf(result: { content: Array<{ type: string; text?: string }> }): string {
+  return result.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text ?? "")
+    .join("\n");
 }
