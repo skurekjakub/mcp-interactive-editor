@@ -14600,7 +14600,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve5.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -14627,7 +14627,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve5(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -15452,7 +15452,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -15814,7 +15814,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve4,
+      resolve: resolve5,
       resolveComponent,
       equal,
       serialize,
@@ -18805,7 +18805,7 @@ var require_dist = __commonJS({
 
 // src/server.ts
 import { homedir } from "node:os";
-import { resolve as resolve3 } from "node:path";
+import { resolve as resolve4 } from "node:path";
 
 // node_modules/zod/v3/external.js
 var external_exports = {};
@@ -26429,7 +26429,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error40) {
@@ -26446,7 +26446,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       const earlyReject = (error40) => {
         reject(error40);
       };
@@ -26524,7 +26524,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve5(parseResult.data);
           }
         } catch (error40) {
           reject(error40);
@@ -26785,12 +26785,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve5, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -27881,7 +27881,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+      await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -28545,12 +28545,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve4();
+        resolve5();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve5);
       }
     });
   }
@@ -28856,16 +28856,16 @@ function awaitReview(proposalId, timeoutMs = REVIEW_TIMEOUT_MS) {
   if (waiting.has(proposalId)) {
     throw new Error(`Already waiting on a review for ${proposalId}.`);
   }
-  return new Promise((resolve4) => {
+  return new Promise((resolve5) => {
     const timer = setTimeout(() => {
       waiting.delete(proposalId);
-      resolve4({
+      resolve5({
         kind: "unanswered",
         why: `Nobody responded in the editor within ${Math.round(timeoutMs / 6e4)} minutes.`
       });
     }, timeoutMs);
     timer.unref?.();
-    waiting.set(proposalId, { resolve: resolve4, timer });
+    waiting.set(proposalId, { resolve: resolve5, timer });
   });
 }
 function resolveReview(proposalId, outcome) {
@@ -28953,6 +28953,7 @@ function whyNotPanel(html) {
 
 // src/proposals.ts
 import { randomUUID } from "node:crypto";
+import { resolve as resolve3 } from "node:path";
 
 // shared/diff.ts
 var LCS_LINE_BUDGET = 1500;
@@ -29260,6 +29261,9 @@ function hasBlockers(findings) {
   return findings.some((f2) => f2.severity === "blocker");
 }
 
+// src/version.ts
+var SERVER_VERSION = "0.5.1";
+
 // src/proposals.ts
 var proposals = /* @__PURE__ */ new Map();
 async function createProposal(guard, input) {
@@ -29310,7 +29314,8 @@ function buildEditorState(guard, proposal) {
     findings: lintProposal(proposal, stats),
     diff: hunks,
     roots: guard.roots,
-    dryRun: guard.dryRun
+    dryRun: guard.dryRun,
+    serverVersion: SERVER_VERSION
   };
 }
 function diffStatsFor(proposal) {
@@ -29318,10 +29323,22 @@ function diffStatsFor(proposal) {
   return diffLines(proposal.baseline, after).stats;
 }
 function findOpenProposal(path) {
-  const open = [...proposals.values()].filter(
-    (p2) => !p2.committedAt && (path === void 0 || p2.target.requested === path)
-  );
-  return open[open.length - 1];
+  const open = [...proposals.values()].filter((p2) => !p2.committedAt);
+  if (open.length === 0) return void 0;
+  if (path === void 0) return open[open.length - 1];
+  const exact = open.filter((p2) => p2.target.requested === path);
+  if (exact.length > 0) return exact[exact.length - 1];
+  const resolved = open.filter((p2) => samePath(p2.target.requested, path));
+  if (resolved.length > 0) return resolved[resolved.length - 1];
+  return open.length === 1 ? open[0] : void 0;
+}
+function samePath(a, b) {
+  const normalise = (p2) => resolve3(p2).split("\\").join("/").toLowerCase();
+  try {
+    return normalise(a) === normalise(b);
+  } catch {
+    return false;
+  }
 }
 
 // src/tools/results.ts
@@ -29908,7 +29925,7 @@ function parseArgs(argv) {
   return cli;
 }
 function expandHome(p2) {
-  return p2.startsWith("~") ? resolve3(homedir(), p2.slice(1).replace(/^[/\\]/, "")) : resolve3(p2);
+  return p2.startsWith("~") ? resolve4(homedir(), p2.slice(1).replace(/^[/\\]/, "")) : resolve4(p2);
 }
 var HELP = `mcp-interactive-editor \u2014 a live-edit review panel in front of every file write.
 
@@ -29955,7 +29972,7 @@ ${HELP}`);
   const guard = new FsGuard({ roots: cli.roots, deny: cli.deny, dryRun: cli.dryRun });
   const commitVisibility = cli.terminalApproval ? ["model", "app"] : ["app"];
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.5.0" },
+    { name: "interactive-editor", version: SERVER_VERSION },
     {
       instructions: "propose_write opens an editable review panel: the human gets a live diff against disk, edits your draft in place, and either saves it or comments on it. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves.\n\nIt returns as soon as the panel is open. The outcome reaches you separately: a receipt if they saved, or their comments quoted against the lines they are about. Comments mean the draft was declined \u2014 nothing was written, so redraft from what they said rather than re-proposing the same content.\n\nStarted with --block-on-review, the call instead waits and its own result is the outcome."
     }

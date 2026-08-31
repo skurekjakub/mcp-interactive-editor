@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type { EditorState, Proposal, WriteMode } from "../shared/types.js";
 import { diffLines } from "../shared/diff.js";
 import { lintProposal } from "../shared/lint.js";
 import { FsGuard, sha256 } from "./fsGuard.js";
+import { SERVER_VERSION } from "./version.js";
 
 /**
  * Proposals live for the lifetime of the server process, and no longer. A
@@ -84,6 +86,7 @@ export function buildEditorState(guard: FsGuard, proposal: Proposal): EditorStat
     diff: hunks,
     roots: guard.roots,
     dryRun: guard.dryRun,
+    serverVersion: SERVER_VERSION,
   };
 }
 
@@ -101,8 +104,39 @@ export function diffStatsFor(proposal: Proposal) {
  * one before it.
  */
 export function findOpenProposal(path?: string): Proposal | undefined {
-  const open = [...proposals.values()].filter(
-    (p) => !p.committedAt && (path === undefined || p.target.requested === path),
-  );
-  return open[open.length - 1];
+  const open = [...proposals.values()].filter((p) => !p.committedAt);
+  if (open.length === 0) return undefined;
+  if (path === undefined) return open[open.length - 1];
+
+  const exact = open.filter((p) => p.target.requested === path);
+  if (exact.length > 0) return exact[exact.length - 1];
+
+  // The panel sends back whatever the host handed it, and a host is free to
+  // normalise that on the way through — slashes, case, relative to absolute.
+  const resolved = open.filter((p) => samePath(p.target.requested, path));
+  if (resolved.length > 0) return resolved[resolved.length - 1];
+
+  /*
+   * Still nothing, and only one proposal is open: it must be that one, whatever
+   * the host did to the path on the way through. Without this a panel retries a
+   * string it will never match and dies on a loading screen, which is the worst
+   * failure this thing has — the editor is the product, and refusing to open it
+   * because two spellings differ helps nobody.
+   *
+   * With several open, guess nothing. "Newest" is not good enough: the panel may
+   * be asking before its own proposal exists, and handing it somebody else's
+   * gets it editing the wrong file. The retry will find the right one once it is
+   * created.
+   */
+  return open.length === 1 ? open[0] : undefined;
+}
+
+/** Same file by any spelling a host might hand back. */
+function samePath(a: string, b: string): boolean {
+  const normalise = (p: string) => resolve(p).split("\\").join("/").toLowerCase();
+  try {
+    return normalise(a) === normalise(b);
+  } catch {
+    return false;
+  }
 }

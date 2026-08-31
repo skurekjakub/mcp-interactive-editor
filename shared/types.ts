@@ -60,6 +60,14 @@ export interface EditorState {
   roots: string[];
   /** True when the server was started with --dry-run and will never touch disk. */
   dryRun: boolean;
+  /**
+   * The server's version, so the panel can notice it is a different build.
+   *
+   * The `.mcpb` extension and the Claude Code plugin are separate installs with
+   * separate update cycles. When they drift, the symptom is behaviour matching
+   * neither release, and nothing on screen says so.
+   */
+  serverVersion: string;
 }
 
 /**

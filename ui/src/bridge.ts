@@ -3,6 +3,7 @@ import type { CallToolResult, ContentBlock } from "@modelcontextprotocol/sdk/typ
 import type { EditorState, Proposal } from "../../shared/types.js";
 import { diffLines } from "../../shared/diff.js";
 import { lintProposal } from "../../shared/lint.js";
+import { PANEL_VERSION } from "./lib/version.js";
 
 /**
  * Everything the View needs from the outside world, behind one small interface.
@@ -135,6 +136,7 @@ export function previewBridge(): Bridge {
       diff: hunks,
       roots: ["/preview"],
       dryRun: true,
+      serverVersion: PANEL_VERSION,
     };
   };
 
@@ -212,5 +214,6 @@ export function previewState(): EditorState {
     diff: hunks,
     roots: ["/preview"],
     dryRun: true,
+    serverVersion: PANEL_VERSION,
   };
 }

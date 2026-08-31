@@ -36,6 +36,7 @@ function stateFor(
     diff: diffLines(baseline, content).hunks,
     roots: ["/root"],
     dryRun: over.dryRun ?? false,
+    serverVersion: "test",
   };
 }
 

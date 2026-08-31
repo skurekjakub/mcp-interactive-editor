@@ -480,47 +480,50 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
       const blindRoot = await mkdtemp(join(tmpdir(), "interactive-editor-blind-"));
       const blind = await connect(["--root", blindRoot], NO_PANEL);
       const target = join(blindRoot, "unseen.txt");
+      try {
+        const opened = (await blind.callTool({
+          name: "propose_write",
+          arguments: { path: target, content: "never reviewed\n" },
+        })) as CallToolResult;
+        const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
 
-      const opened = (await blind.callTool({
-        name: "propose_write",
-        arguments: { path: target, content: "never reviewed\n" },
-      })) as CallToolResult;
-      const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+        // The agent can reach the app-only tool in such a host. That is the problem,
+        // and marking itself attached must not be enough to get through the door.
+        await blind.callTool({ name: "editor_attach", arguments: { proposalId: id } });
+        const committed = (await blind.callTool({
+          name: "editor_commit",
+          arguments: { proposalId: id },
+        })) as CallToolResult;
 
-      // The agent can reach the app-only tool in such a host. That is the problem,
-      // and marking itself attached must not be enough to get through the door.
-      await blind.callTool({ name: "editor_attach", arguments: { proposalId: id } });
-      const committed = (await blind.callTool({
-        name: "editor_commit",
-        arguments: { proposalId: id },
-      })) as CallToolResult;
-
-      expect(committed.isError, "a commit with no panel must be refused").toBe(true);
-      expect(text(committed)).toMatch(/does not render MCP Apps/i);
-      await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
-
-      await blind.close();
-      await rm(blindRoot, { recursive: true, force: true });
+        expect(committed.isError, "a commit with no panel must be refused").toBe(true);
+        expect(text(committed)).toMatch(/does not render MCP Apps/i);
+        await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
+      } finally {
+        // Without this, a failed assertion above leaks a live server process.
+        await blind.close();
+        await rm(blindRoot, { recursive: true, force: true });
+      }
     });
 
     it("writes anyway once --terminal-approval makes the client's prompt the gate", async () => {
       const optedIn = await mkdtemp(join(tmpdir(), "interactive-editor-terminal-"));
       const terminal = await connect(["--root", optedIn, "--terminal-approval"], NO_PANEL);
       const target = join(optedIn, "approved.txt");
+      try {
+        const opened = (await terminal.callTool({
+          name: "propose_write",
+          arguments: { path: target, content: "opted in\n" },
+        })) as CallToolResult;
+        const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
 
-      const opened = (await terminal.callTool({
-        name: "propose_write",
-        arguments: { path: target, content: "opted in\n" },
-      })) as CallToolResult;
-      const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+        await terminal.callTool({ name: "editor_attach", arguments: { proposalId: id } });
+        await terminal.callTool({ name: "editor_commit", arguments: { proposalId: id } });
 
-      await terminal.callTool({ name: "editor_attach", arguments: { proposalId: id } });
-      await terminal.callTool({ name: "editor_commit", arguments: { proposalId: id } });
-
-      expect(await readFile(target, "utf8")).toBe("opted in\n");
-
-      await terminal.close();
-      await rm(optedIn, { recursive: true, force: true });
+        expect(await readFile(target, "utf8")).toBe("opted in\n");
+      } finally {
+        await terminal.close();
+        await rm(optedIn, { recursive: true, force: true });
+      }
     });
   });
 
@@ -633,24 +636,25 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
       const dryRoot = await mkdtemp(join(tmpdir(), "interactive-editor-dry-"));
       const dryClient = await connect(["--root", dryRoot, "--dry-run"]);
       const target = join(dryRoot, "phantom.txt");
+      try {
+        const opened = (await dryClient.callTool({
+          name: "propose_write",
+          arguments: { path: target, content: "not real\n" },
+        })) as CallToolResult;
+        const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
 
-      const opened = (await dryClient.callTool({
-        name: "propose_write",
-        arguments: { path: target, content: "not real\n" },
-      })) as CallToolResult;
-      const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+        await dryClient.callTool({ name: "editor_attach", arguments: { proposalId: id } });
+        const receipt = (await dryClient.callTool({
+          name: "editor_commit",
+          arguments: { proposalId: id },
+        })) as CallToolResult;
 
-      await dryClient.callTool({ name: "editor_attach", arguments: { proposalId: id } });
-      const receipt = (await dryClient.callTool({
-        name: "editor_commit",
-        arguments: { proposalId: id },
-      })) as CallToolResult;
-
-      expect((receipt.structuredContent as unknown as CommitReceipt).dryRun).toBe(true);
-      await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
-
-      await dryClient.close();
-      await rm(dryRoot, { recursive: true, force: true });
+        expect((receipt.structuredContent as unknown as CommitReceipt).dryRun).toBe(true);
+        await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
+      } finally {
+        await dryClient.close();
+        await rm(dryRoot, { recursive: true, force: true });
+      }
     });
   });
 });

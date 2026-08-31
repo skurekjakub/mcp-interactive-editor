@@ -6,6 +6,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-31
+
+Five things that were owed.
+
+### Added
+
+- **The panel has tests.** Nothing in `ui/` was reachable from the suite, and
+  three regressions shipped through that gap while 187 tests stayed green: a
+  highlight that could not be commented on, a loading screen that swallowed its
+  own error, and a view that removed the editor. Each is now a named test in
+  `test/panel`, rendered under jsdom. Reintroducing all three turns five of the
+  nine red, which is the only evidence that a regression test is worth having.
+- **The panel says when it is a different build from the server.** `EditorState`
+  carries `serverVersion`; the panel compares it to its own and puts a line on
+  screen when they disagree. The `.mcpb` and the Claude Code plugin update
+  independently, and a stale half looks exactly like a bug in the other one — it
+  cost two debugging sessions before anything said so.
+
+### Fixed
+
+- **A path the host had renamed could strand the panel forever.**
+  `editor_pending` matched `target.requested` by string equality against
+  whatever the host handed back in `tool-input`. Any normalisation — slashes,
+  case, relative to absolute — missed, and the panel then retried a string it
+  could never match until it died on the loading screen. It now compares
+  resolved paths, and falls back to the single open proposal when there is
+  exactly one, since it can only be that one. With several open it still guesses
+  nothing: the panel may be asking before its own proposal exists, and handing it
+  someone else's puts it on the wrong file.
+- **Tests no longer leak server processes.** Three tests build their own client
+  inside the test body and tidy up on the last line, so any failing assertion
+  left a live stdio child behind — doubled since the suite began running against
+  two entry points. They are wrapped in `try`/`finally`.
+
+### Changed
+
+- Version lives in one module per half, `src/version.ts` and
+  `ui/src/lib/version.ts`, instead of being a literal inside unrelated code that
+  the bump script had to pattern-match.
+- `AGENTS.md` records why a tool call must not wait for the panel, with the
+  measurements, the line of spec that makes it a host decision, and why
+  elicitation is not the way out.
+
 ## [0.5.0] - 2026-08-31
 
 ### Changed
@@ -292,7 +335,8 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.0...v0.4.1

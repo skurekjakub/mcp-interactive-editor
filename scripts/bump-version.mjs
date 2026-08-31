@@ -73,10 +73,10 @@ planned.push({
   content: `${JSON.stringify(marketplace, null, 2)}\n`,
 });
 
-/** The two places the running code names itself over the wire. */
-for (const rel of ["src/server.ts", "ui/src/hooks/useProposalSession.ts"]) {
+/** The two halves' own version modules. */
+for (const rel of ["src/version.ts", "ui/src/lib/version.ts"]) {
   const before = read(rel);
-  const pattern = /(name: "interactive-editor", version: ")\d+\.\d+\.\d+(")/;
+  const pattern = /(_VERSION = ")\d+\.\d+\.\d+(")/;
   if (!pattern.test(before)) {
     problems.push(`${rel}: could not find the version literal`);
     continue;

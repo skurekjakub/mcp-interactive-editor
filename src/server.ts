@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { DEFAULT_DENY, FsGuard } from "./fsGuard.js";
 import { registerTools } from "./tools/index.js";
+import { SERVER_VERSION } from "./version.js";
 
 interface Cli {
   roots: string[];
@@ -126,7 +127,7 @@ async function main(): Promise<void> {
     : ["app"];
 
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.5.0" },
+    { name: "interactive-editor", version: SERVER_VERSION },
     {
       instructions:
         "propose_write opens an editable review panel: the human gets a live diff against disk, " +

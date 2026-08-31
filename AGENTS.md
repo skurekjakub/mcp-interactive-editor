@@ -73,10 +73,51 @@ the diff, and the write is refused. `--terminal-approval` is the documented,
 weaker opt-out. There are end-to-end tests that walk the whole attack — propose,
 self-attach, commit — and assert the refusal. Do not weaken them.
 
+## Do not make a tool call wait for the panel
+
+`propose_write` held its call open until the human decided, and the result was a
+panel that never loaded. Not because the logic is wrong — a plain MCP client gets
+an answer from `editor_pending` in 4ms while `propose_write` is still open, and
+the whole accept/comment/discard round trip completes in 138ms. The server
+dispatches concurrently.
+
+The part that does not hold is the host. Blocking requires it to keep forwarding
+the panel's own calls _during_ the call that created the panel, and the MCP Apps
+spec explicitly refuses to promise that:
+
+> The Host MAY forward any message from the View ... it MAY decide to block some
+> messages or subject them to further user approval.
+
+At least one host does not forward them in time. The panel cannot claim its
+proposal, sits on "Opening…", and the editor — the entire product — is unusable.
+So blocking is `--block-on-review`, off by default. Do not turn it on as a
+default again without testing it in a real host first; a passing suite proves
+nothing here, because the suite drives the server directly and never renders.
+
+**Elicitation is not the way out.** MCP's own primitive for pausing to ask is
+`server.elicitInput`, and its result is exactly `accept | decline | cancel` — the
+right shape. It renders the _client's_ form from a JSON schema, so adopting it
+means giving up the editor. The Apps spec and the elicitation spec do not
+reference each other.
+
 ## Where code goes, so it can be tested
 
-`tsconfig.test.json` covers `shared/`, `src/`, and `ui/src/lib/`. It does **not**
-cover React or anything DOM-touching.
+Three vitest projects: `node` (`test/unit` + `test/e2e`, no DOM) and `panel`
+(`test/panel/*.test.tsx`, jsdom + React). `tsconfig.test.json` covers `shared/`,
+`src/` and `ui/src/lib/`; the panel tests typecheck under `ui/tsconfig.json`,
+which is the one with DOM and JSX.
+
+`test/panel` exists because three regressions shipped out of `ui/` while the
+whole suite stayed green — a highlight that could not be commented on, a loading
+screen that swallowed its own error, and a view that removed the editor. Every
+one is now a named test. Rendering `<App />` under jsdom puts it in preview mode
+(`window.parent === window`), so it comes up on the fixture proposal with a real
+diff and the bridge stub, and can be driven with `fireEvent`.
+
+**Version lives in exactly two modules**: `src/version.ts` and
+`ui/src/lib/version.ts`, one per half. `npm run bump` rewrites both, and the
+panel compares them at runtime and says so on screen when they disagree — the two
+installs have separate update cycles and genuinely do drift.
 
 - Pure logic shared by both builds → `shared/` (`passages.ts`, `diff.ts`, `lint.ts`)
 - Pure logic for the server → `src/`, e.g. `src/tools/results.ts`

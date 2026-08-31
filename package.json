@@ -1,6 +1,6 @@
 {
   "name": "mcp-interactive-editor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "description": "An MCP App that opens an interactive editor for every file write a model proposes. You edit it by hand, and nothing reaches disk until you say so.",
   "files": [
@@ -32,11 +32,14 @@
   },
   "devDependencies": {
     "@anthropic-ai/mcpb": "^2.1.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.6",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "esbuild": "^0.25.12",
+    "jsdom": "^30.0.1",
     "prettier": "^3.9.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

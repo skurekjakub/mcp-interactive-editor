@@ -3,6 +3,7 @@ import { useApp, useHostStyleVariables } from "@modelcontextprotocol/ext-apps/re
 import type { EditorState, ProposalHandle } from "../../../shared/types.js";
 import { IS_PREVIEW, hostBridge, previewBridge, previewState, type Bridge } from "../bridge.js";
 import { messageOf } from "../lib/results.js";
+import { PANEL_VERSION } from "../lib/version.js";
 
 const PUSH_DEBOUNCE_MS = 500;
 
@@ -74,7 +75,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
   }, []);
 
   const { app, isConnected, error } = useApp({
-    appInfo: { name: "interactive-editor", version: "0.5.0" },
+    appInfo: { name: "interactive-editor", version: PANEL_VERSION },
     // Declaring these is what makes fullscreen offerable at all: a host will not
     // grow a panel that never said it could handle being grown.
     capabilities: { availableDisplayModes: ["inline", "fullscreen"] },

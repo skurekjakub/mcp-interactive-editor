@@ -8,8 +8,10 @@ import { useCommitFlow } from "./hooks/useCommitFlow.js";
 import { usePassages } from "./hooks/usePassages.js";
 import { useProposalSession } from "./hooks/useProposalSession.js";
 import { commitLabel } from "./lib/labels.js";
+import { PANEL_VERSION } from "./lib/version.js";
 import { Findings } from "./components/Findings.js";
 import { ProposalTag } from "./components/ProposalTag.js";
+import { OpeningStatus } from "./components/OpeningStatus.js";
 import { Receipt } from "./components/Receipt.js";
 import { SentBack } from "./components/SentBack.js";
 import { CommentPopover } from "./components/CommentPopover.js";
@@ -100,26 +102,8 @@ export function App() {
     );
   }
   if (!state || !local) {
-    /*
-     * Say which step this is stuck on, and show the reason if there is one.
-     *
-     * This used to be a bare "Opening …" that rendered whatever happened, so a
-     * failed claim or a failed attach looked exactly like a slow one — a
-     * spinner forever, with the actual error sitting in state that nothing on
-     * this branch ever read.
-     */
     return (
-      <div className="status">
-        <div>Opening {handle?.display ?? "the editor"}…</div>
-        <div className="status-phase">
-          {session.phase === "connecting"
-            ? "waiting for the host"
-            : session.phase === "claiming"
-              ? "asking the server which proposal this panel is for"
-              : "attaching to the proposal"}
-        </div>
-        {session.failure ? <div className="status-error">{session.failure}</div> : null}
-      </div>
+      <OpeningStatus display={handle?.display} phase={session.phase} failure={session.failure} />
     );
   }
   if (receipt) return <Receipt receipt={receipt} />;
@@ -134,6 +118,18 @@ export function App() {
 
   return (
     <div className="review">
+      {state.serverVersion !== PANEL_VERSION ? (
+        /*
+         * Two installs, two update cycles. When they drift the behaviour matches
+         * neither release, and every symptom looks like a bug in whichever half
+         * you happen to be reading. Say it out loud instead.
+         */
+        <div className="status status-error">
+          This panel is {PANEL_VERSION} but the server is {state.serverVersion}. Reinstall so both
+          halves are the same build — until then, expect either one to misbehave.
+        </div>
+      ) : null}
+
       <ProposalTag
         proposal={proposal}
         stats={stats}

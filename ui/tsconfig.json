@@ -14,5 +14,5 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../shared/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../shared/**/*.ts", "../test/panel/**/*.tsx"]
 }
