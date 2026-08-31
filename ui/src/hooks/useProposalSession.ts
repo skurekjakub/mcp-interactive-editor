@@ -59,7 +59,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
   }, []);
 
   const { app, isConnected, error } = useApp({
-    appInfo: { name: "interactive-editor", version: "0.4.0" },
+    appInfo: { name: "interactive-editor", version: "0.4.1" },
     capabilities: {},
     onAppCreated: (instance) => {
       // Arguments arrive before any result does — and now the result does not

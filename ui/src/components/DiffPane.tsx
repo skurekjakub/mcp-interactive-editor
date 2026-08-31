@@ -24,7 +24,10 @@ export function DiffPane({ hunks, isNewFile, onSelect }: DiffPaneProps) {
 
   if (hunks.length === 0) {
     return (
-      <div className="diff-empty">
+      // Handlers here too: an unchanged file still renders through this branch,
+      // and a pane that silently ignores selections is worse than one that has
+      // nothing to select.
+      <div className="diff-empty" ref={rootRef} onMouseUp={syncSelection} onKeyUp={syncSelection}>
         {isNewFile ? "New file — everything here is an addition." : "Identical to what is on disk."}
       </div>
     );

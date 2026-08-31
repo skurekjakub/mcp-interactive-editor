@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     : ["app"];
 
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.4.0" },
+    { name: "interactive-editor", version: "0.4.1" },
     {
       instructions:
         "propose_write opens an editable review panel and does not return until the human has " +

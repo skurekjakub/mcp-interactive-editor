@@ -29947,7 +29947,7 @@ ${HELP}`);
   const guard = new FsGuard({ roots: cli.roots, deny: cli.deny, dryRun: cli.dryRun });
   const commitVisibility = cli.terminalApproval ? ["model", "app"] : ["app"];
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.4.0" },
+    { name: "interactive-editor", version: "0.4.1" },
     {
       instructions: "propose_write opens an editable review panel and does not return until the human has decided. Accept with no comment and it commits, and the result is a receipt for what landed. Comment on it and that is a rejection: nothing is written, and the result carries their words quoted against the lines they are about \u2014 redraft from those and propose again rather than re-sending the same content. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves."
     }

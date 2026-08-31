@@ -141,9 +141,11 @@ export function App() {
         />
       ) : null}
 
-      {tray.passages.length > 0 ? (
+      {tray.active ? (
         <SelectionBar
+          pending={tray.pending}
           passages={tray.passages}
+          onAttach={tray.pin}
           path={proposal.target.display}
           sending={tray.sending}
           onAnnotate={tray.annotate}
