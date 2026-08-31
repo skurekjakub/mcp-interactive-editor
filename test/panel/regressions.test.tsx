@@ -185,7 +185,7 @@ describe("a highlight is always commentable", () => {
     expect(send.disabled).toBe(false);
   });
 
-  it("makes committing and commenting exclusive", () => {
+  it("makes committing and commenting exclusive", async () => {
     render(<App />);
 
     const editor = screen.getByLabelText("Proposed file contents") as HTMLTextAreaElement;
@@ -196,10 +196,16 @@ describe("a highlight is always commentable", () => {
     const row = document.querySelector(".selection-row") as HTMLElement;
     fireEvent.change(within(row).getByRole("textbox"), { target: { value: "no" } });
 
-    // Commenting is declining. Committing anyway would be the contradiction.
-    const commit = document.querySelector("button.commit") as HTMLButtonElement;
-    expect(commit.disabled).toBe(true);
-    expect(commit.textContent).toMatch(/send the comments/i);
+    // Commenting is declining, so this press must not write. Asserted on where
+    // the panel lands rather than on a disabled button: a button that cannot be
+    // pressed satisfies exclusivity by offering nothing at all, which is how the
+    // only remaining action came to do nothing.
+    fireEvent.click(document.querySelector("button.commit") as HTMLButtonElement);
+
+    // "Sent back" and the receipt are different terminal screens, so landing on
+    // the first is the assertion that no write happened.
+    expect(await screen.findByText("Sent back")).toBeTruthy();
+    expect(screen.getByText(/nothing was written/i)).toBeTruthy();
   });
 });
 
@@ -242,3 +248,61 @@ function nthNewline(text: string, n: number): number {
   }
   return at;
 }
+
+/*
+ * The seam between the tray and the threshold.
+ *
+ * Both halves were correct in isolation: the tray sent when asked, and the
+ * threshold rendered whatever label its props described. Nothing rendered them
+ * together, so a button carrying the send's label while wired to the commit —
+ * and disabled besides — went unnoticed. Testing it needs the whole panel.
+ */
+describe("commenting leaves an action that works", () => {
+  /**
+   * Pins a highlight and comments on it.
+   *
+   * @param comment - What to write against the highlight.
+   */
+  function commentOnSomething(comment: string) {
+    const editor = screen.getByLabelText("Proposed file contents") as HTMLTextAreaElement;
+    editor.setSelectionRange(0, 16);
+    fireEvent.select(editor);
+    fireEvent.click(screen.getAllByRole("button", { name: /^\+ Add$/ })[0]);
+
+    const box = document.querySelector(".selection-row textarea") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: comment } });
+  }
+
+  it("offers the send on the threshold, and performs it", async () => {
+    // Arrange.
+    render(<App />);
+    commentOnSomething("why this line?");
+
+    // Act.
+    const button = document.querySelector("button.commit") as HTMLButtonElement;
+
+    // Assert: the label promises the send, so the press has to make it happen.
+    expect(button.textContent).toMatch(/send the comments/i);
+    expect(button.disabled, "the only action left cannot be disabled").toBe(false);
+
+    fireEvent.click(button);
+    expect(await screen.findByText("Sent back")).toBeTruthy();
+  });
+
+  it("says which door is shut while a highlight is still uncommented", () => {
+    // Arrange: one commented, one not.
+    render(<App />);
+    commentOnSomething("why this line?");
+
+    const editor = screen.getByLabelText("Proposed file contents") as HTMLTextAreaElement;
+    editor.setSelectionRange(20, 40);
+    fireEvent.select(editor);
+    fireEvent.click(screen.getAllByRole("button", { name: /^\+ Add$/ })[0]);
+
+    // Assert: committing is gone because a comment declines the draft, and the
+    // send refuses a half-answered tray. Both shut and silent is the dead end.
+    const button = document.querySelector("button.commit") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toMatch(/comment on every highlight/i);
+  });
+});

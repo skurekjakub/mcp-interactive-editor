@@ -41,7 +41,7 @@
 
   --line-height: 1.55;
   --pane-min: 240px;
-  --pane-max: 420px;
+  --pane-max: 800px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -88,6 +88,32 @@ body {
   flex-direction: column;
   gap: 0;
   min-width: 0;
+}
+
+/*
+ * Fullscreen is a request for the height, not just the width.
+ *
+ * Inline, the host decides how tall the frame is and the panes are capped so the
+ * threshold stays on screen without scrolling to it. Fullscreen has the whole
+ * viewport and capping there leaves the editor its usual few hundred pixels with
+ * dead space underneath, which is the one thing the button was pressed to avoid.
+ */
+.review[data-display="fullscreen"] {
+  min-height: 100vh;
+}
+
+.review[data-display="fullscreen"] .panes {
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * Excluding the compact pane on purpose. This selector outranks the 140px cap
+ * that "diff" puts on the editor, so lifting the cap for everything would take
+ * the shrunken editor with it and give the diff no more room than it had.
+ */
+.review[data-display="fullscreen"] .pane:not([data-compact="true"]) {
+  max-height: none;
 }
 
 /* -------------------------------------------------------------------------

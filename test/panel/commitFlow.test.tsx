@@ -9,6 +9,8 @@ import { usePassages } from "../../ui/src/hooks/usePassages.js";
 /** A bridge that records what was called and answers however a test says to. */
 interface StubBridge extends Bridge {
   calls: string[];
+  /** Arguments per call, so a test can assert what actually travelled. */
+  sent: Array<Record<string, unknown>>;
 }
 
 /**
@@ -19,10 +21,13 @@ interface StubBridge extends Bridge {
  */
 function stubBridge(answers: Record<string, CallToolResult> = {}): StubBridge {
   const calls: string[] = [];
+  const sent: Array<Record<string, unknown>> = [];
   return {
     calls,
-    async callTool(name) {
+    sent,
+    async callTool(name, args) {
       calls.push(name);
+      sent.push(args);
       return answers[name] ?? { content: [{ type: "text", text: "ok" }], structuredContent: {} };
     },
     async updateModelContext() {
@@ -238,7 +243,7 @@ describe("sending comments", () => {
     });
 
     // Act.
-    await act(() => result.current.send(""));
+    await act(() => result.current.send());
 
     // Assert.
     expect(bridge.calls).toEqual([]);
@@ -264,5 +269,37 @@ describe("sending comments", () => {
     // Assert.
     expect(result.current.outgoing).toHaveLength(1);
     expect(result.current.passages).toHaveLength(0);
+  });
+
+  it("carries the message the human typed about all of them", async () => {
+    /*
+     * The box lives in the bar but more than one control sends, so the text has
+     * to belong to the tray. A sender holding its own copy sends an empty one
+     * and the paragraph goes nowhere, with nothing on screen saying it was
+     * dropped.
+     */
+    const bridge = stubBridge();
+    const { result } = renderHook(() => usePassages(bridge, "id", "file.yml", () => {}));
+
+    act(() => {
+      result.current.pin({
+        id: "editor:0-5",
+        source: "editor",
+        text: "jobs:",
+        startLine: 1,
+        endLine: 1,
+        note: "why this job?",
+      });
+    });
+    act(() => result.current.setNote("Overall: split these up."));
+
+    // Act.
+    await act(() => result.current.send());
+
+    // Assert.
+    expect(bridge.calls).toContain("editor_request_changes");
+    const message = String(bridge.sent[0].message);
+    expect(message).toContain("why this job?");
+    expect(message).toContain("Overall: split these up.");
   });
 });

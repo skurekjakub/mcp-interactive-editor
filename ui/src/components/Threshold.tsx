@@ -12,6 +12,15 @@ interface ThresholdProps {
    * the thing being asked for. The two are exclusive on purpose.
    */
   hasComments: boolean;
+  /**
+   * A highlight is still waiting for its comment, so sending would drop it.
+   *
+   * Said out loud rather than left to a button that does nothing: commenting
+   * has already taken committing away, and a send that silently declines to
+   * happen leaves both doors shut with no indication which one to open.
+   */
+  commentsIncomplete: boolean;
+  onSendComments: () => void;
   busy: boolean;
   /** False when the path itself was refused; there is nothing to commit to. */
   writable: boolean;
@@ -39,6 +48,8 @@ export function Threshold({
   isDelete,
   blocked,
   hasComments,
+  commentsIncomplete,
+  onSendComments,
   busy,
   writable,
   unchanged,
@@ -70,16 +81,23 @@ export function Threshold({
         <button className="btn btn-quiet" type="button" onClick={onDiscard} disabled={busy}>
           Discard
         </button>
+        {/*
+          With comments pinned this is the send, not the commit. It is the only
+          action left at this point, so it has to perform one: a button wearing
+          the send's label while wired to the commit is a press that does nothing.
+        */}
         <button
           className={`commit${isDelete ? " commit-danger" : ""}`}
           type="button"
-          onClick={onCommit}
-          disabled={blocked || busy || unchanged || !writable || hasComments}
+          onClick={hasComments ? onSendComments : onCommit}
+          disabled={busy || (hasComments ? commentsIncomplete : blocked || unchanged || !writable)}
         >
           {busy
             ? "Working…"
             : hasComments
-              ? "Send the comments instead"
+              ? commentsIncomplete
+                ? "Comment on every highlight to send"
+                : "Send the comments instead"
               : unchanged
                 ? "No changes to save"
                 : label}

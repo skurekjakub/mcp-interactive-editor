@@ -5,8 +5,15 @@ import { awaitReview, isAwaitingReview, resolveReview } from "../review.js";
 import type { ToolContext } from "./context.js";
 import { describeCommit } from "../../shared/receipt.js";
 
-/** How often to check whether a panel has attached, in milliseconds. */
-const ATTACH_POLL_MS = 25;
+/**
+ * How often to check whether a panel has attached, in milliseconds.
+ *
+ * Each check reads the proposal from the store, which is a file rather than a
+ * map entry, so the interval is paced for a syscall and not for a property
+ * read. Across a thirty-second grace the difference is a thousand reads against
+ * a few hundred, and the panel is still noticed within a tenth of a second.
+ */
+const ATTACH_POLL_MS = 100;
 
 /**
  * Holds a tool call open until the panel reports what happened.
