@@ -1,0 +1,135 @@
+name: release
+
+# Triggered by hand, from the Actions tab or `gh workflow run release.yml`.
+# Releasing on a tag push would mean the tag is the decision, and a tag pushed
+# by mistake cannot be taken back once installs have seen it.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 0.6.1. Must already be committed."
+        required: true
+        type: string
+      draft:
+        description: "Publish as a draft first"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refuse a version the tree does not declare
+        # The whole point of the bump script is that every declaration moves
+        # together. Releasing a version the tree does not claim would ship an
+        # artifact whose manifest disagrees with its own tag.
+        run: |
+          declared=$(node -pe 'require("./package.json").version')
+          if [ "$declared" != "${{ inputs.version }}" ]; then
+            echo "::error::asked to release ${{ inputs.version }} but the tree declares $declared — run 'npm run bump -- ${{ inputs.version }}' first"
+            exit 1
+          fi
+          node --input-type=module -e "
+            const { versionDrift } = await import('./scripts/versions.mjs');
+            const drift = versionDrift();
+            if (drift.length) {
+              console.error('::error::the declared versions disagree: ' + drift.join('; '));
+              process.exit(1);
+            }
+          "
+
+      - name: Refuse a version that is already tagged
+        run: |
+          git fetch --tags --quiet
+          if git rev-parse "v${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::v${{ inputs.version }} already exists — releasing over it would change what an existing install resolves to"
+            exit 1
+          fi
+
+      - name: Refuse a version the changelog does not describe
+        run: |
+          if ! grep -q "^## \[${{ inputs.version }}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for ${{ inputs.version }}"
+            exit 1
+          fi
+
+      - name: Verify
+        run: npm run verify
+
+      - name: Pack the extension
+        run: npm run pack
+
+      - name: Read the checksum
+        id: checksum
+        # server.json pins this and registry clients verify it before
+        # installing, so it has to come from the artifact that is actually
+        # uploaded — packing is not reproducible, and a locally computed hash
+        # would describe a different file.
+        run: |
+          sha=$(sha256sum dist/mcp-interactive-editor.mcpb | cut -d' ' -f1)
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "### Extension checksum" >> "$GITHUB_STEP_SUMMARY"
+          echo '`'"$sha"'`' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Take the notes from the changelog
+        id: notes
+        # The changelog section is the release note. Writing it twice is how the
+        # two end up saying different things.
+        run: |
+          awk -v h="## [${{ inputs.version }}]" '
+            index($0, h) == 1 { inside = 1; next }
+            inside && index($0, "## ") == 1 { exit }
+            inside { print }
+          ' CHANGELOG.md > notes.md
+          {
+            echo
+            echo "---"
+            echo
+            echo "**Install:** download \`mcp-interactive-editor.mcpb\` below and open it, or add the plugin marketplace \`skurekjakub/mcp-interactive-editor\` in Claude Code."
+            echo
+            echo "\`sha256\` \`${{ steps.checksum.outputs.sha256 }}\`"
+          } >> notes.md
+          test -s notes.md || { echo "::error::empty release notes"; exit 1; }
+
+      - name: Tag
+        run: |
+          git tag "v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" \
+            dist/mcp-interactive-editor.mcpb \
+            --title "v${{ inputs.version }}" \
+            --notes-file notes.md \
+            ${{ inputs.draft && '--draft' || '' }}
+
+      - name: Say what server.json still needs
+        # Not written here. It describes a published artifact, and a workflow
+        # that pushed it to main would be committing to a branch it did not
+        # verify against.
+        run: |
+          {
+            echo "### server.json"
+            echo "Still pins the previous release. Update it on \`main\`:"
+            echo '```json'
+            echo '"version": "${{ inputs.version }}",'
+            echo '"identifier": "https://github.com/${{ github.repository }}/releases/download/v${{ inputs.version }}/mcp-interactive-editor.mcpb",'
+            echo '"fileSha256": "${{ steps.checksum.outputs.sha256 }}"'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

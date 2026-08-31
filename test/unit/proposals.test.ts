@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FsGuard } from "../../src/fsGuard.js";
@@ -16,7 +16,9 @@ let root: string;
 let guard: FsGuard;
 
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), "proposals-"));
+  // Canonicalised: the guard resolves its roots, and macOS rewrites /var into
+  // /private/var, so the raw temp path is not the path a target resolves to.
+  root = await realpath(await mkdtemp(join(tmpdir(), "proposals-")));
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(join(root, "a.txt"), "original\n", "utf8");
   guard = new FsGuard({ roots: [root], deny: [], dryRun: true });

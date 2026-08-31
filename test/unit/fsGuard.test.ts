@@ -1,5 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse, resolve } from "node:path";
 import { DEFAULT_DENY, FsGuard, sha256 } from "../../src/fsGuard.js";
@@ -9,7 +18,11 @@ let outside: string;
 let guard: FsGuard;
 
 beforeAll(async () => {
-  const base = await mkdtemp(join(tmpdir(), "guard-"));
+  // Canonicalised, because the guard canonicalises its roots and a test that
+  // compared against the raw temp path would be asserting the wrong string on
+  // any platform where they differ — macOS resolves /var into /private/var,
+  // which is the very drift the root-resolution code exists to handle.
+  const base = await realpath(await mkdtemp(join(tmpdir(), "guard-")));
   root = join(base, "root");
   outside = join(base, "outside");
   await mkdir(root, { recursive: true });

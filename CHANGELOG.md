@@ -109,7 +109,9 @@ before it was changed.
 - The claim test now opens two proposals. With one open it took the single-open
   fallback and passed only because earlier tests had left proposals behind.
 
-## [0.6.0] - 2026-08-31
+## 0.6.0 — never published
+
+Cut but not released; everything below shipped as part of 0.6.1.
 
 Four independent audits of the whole surface — server, panel, build and one
 deliberately unscoped — checked against the vendored MCP Apps and MCP
@@ -612,8 +614,7 @@ First cut.
   MCP registry.
 
 [Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.1...HEAD
-[0.6.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.0...v0.6.1
-[0.6.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...v0.6.0
+[0.6.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...v0.6.1
 [0.5.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.2...v0.5.0
