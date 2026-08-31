@@ -24,6 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -53,7 +56,6 @@ jobs:
 
       - name: Refuse a version that is already tagged
         run: |
-          git fetch --tags --quiet
           if git rev-parse "v${{ inputs.version }}" >/dev/null 2>&1; then
             echo "::error::v${{ inputs.version }} already exists — releasing over it would change what an existing install resolves to"
             exit 1
@@ -74,15 +76,51 @@ jobs:
 
       - name: Read the checksum
         id: checksum
-        # server.json pins this and registry clients verify it before
-        # installing, so it has to come from the artifact that is actually
-        # uploaded — packing is not reproducible, and a locally computed hash
-        # would describe a different file.
+        # Registry clients verify this before installing, so it has to be the
+        # hash of the artifact that is actually uploaded. Packing is not
+        # reproducible — zip entries carry mtimes — so a hash taken from any
+        # other build describes a different file.
         run: |
           sha=$(sha256sum dist/mcp-interactive-editor.mcpb | cut -d' ' -f1)
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
           echo "### Extension checksum" >> "$GITHUB_STEP_SUMMARY"
           echo '`'"$sha"'`' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Describe the release in server.json, before it is tagged
+        # This has to land *before* the tag, or the tagged tree describes the
+        # previous release: check out the tag and server.json names the old
+        # artifact and the old checksum. Committing it afterwards leaves that
+        # contradiction in the history permanently.
+        #
+        # The chicken-and-egg is real — the checksum cannot exist before the
+        # artifact — so the artifact is built here, the file is written here,
+        # and only then is anything tagged.
+        run: |
+          node -e '
+            const fs = require("fs");
+            const version = process.env.VERSION;
+            const s = JSON.parse(fs.readFileSync("server.json", "utf8"));
+            s.version = version;
+            s.packages[0].version = version;
+            s.packages[0].identifier =
+              `https://github.com/${process.env.REPO}/releases/download/v${version}/mcp-interactive-editor.mcpb`;
+            s.packages[0].fileSha256 = process.env.SHA256;
+            fs.writeFileSync("server.json", JSON.stringify(s, null, 2) + "\n");
+          '
+          npx prettier --write server.json
+          if git diff --quiet -- server.json; then
+            echo "server.json already describes this release."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.json
+          git commit -m "Describe the v${{ inputs.version }} artifact in server.json"
+          git push origin "HEAD:${{ github.ref_name }}"
+        env:
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
+          SHA256: ${{ steps.checksum.outputs.sha256 }}
 
       - name: Take the notes from the changelog
         id: notes
@@ -104,7 +142,7 @@ jobs:
           } >> notes.md
           test -s notes.md || { echo "::error::empty release notes"; exit 1; }
 
-      - name: Tag
+      - name: Tag the tree that describes itself
         run: |
           git tag "v${{ inputs.version }}"
           git push origin "v${{ inputs.version }}"
@@ -118,18 +156,3 @@ jobs:
             --title "v${{ inputs.version }}" \
             --notes-file notes.md \
             ${{ inputs.draft && '--draft' || '' }}
-
-      - name: Say what server.json still needs
-        # Not written here. It describes a published artifact, and a workflow
-        # that pushed it to main would be committing to a branch it did not
-        # verify against.
-        run: |
-          {
-            echo "### server.json"
-            echo "Still pins the previous release. Update it on \`main\`:"
-            echo '```json'
-            echo '"version": "${{ inputs.version }}",'
-            echo '"identifier": "https://github.com/${{ github.repository }}/releases/download/v${{ inputs.version }}/mcp-interactive-editor.mcpb",'
-            echo '"fileSha256": "${{ steps.checksum.outputs.sha256 }}"'
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
