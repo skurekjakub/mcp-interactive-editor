@@ -19,7 +19,7 @@ export default defineConfig({
     hookTimeout: 20_000,
     coverage: {
       provider: "v8",
-      include: ["shared/**/*.ts", "src/**/*.ts"],
+      include: ["shared/**/*.ts", "src/**/*.ts", "ui/src/lib/**/*.ts"],
       reporter: ["text", "lcov"],
     },
   },

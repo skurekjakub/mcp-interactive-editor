@@ -638,9 +638,51 @@ button {
   background: var(--paper);
 }
 
+/* Regions already pinned. The lock edge marks the ones taken from the diff, so
+   a chip's line numbers can be read against the right side of the change. */
+.selection-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.selection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper-sunk);
+  color: var(--ink-dim);
+  font-family: var(--sans);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.selection-chip[data-source="diff"] {
+  border-left: 3px solid var(--lock);
+}
+
+.selection-chip-drop {
+  padding: 3px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.selection-chip-drop:hover {
+  color: var(--ink);
+  background: var(--paper-raised);
+}
+
 .selection-quote {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   min-width: 0;
   border-left: 3px solid var(--lock);
@@ -668,7 +710,8 @@ button {
 
 .selection-ask {
   display: flex;
-  align-items: center;
+  /* The note grows downward, so the buttons sit with its last line. */
+  align-items: flex-end;
   gap: 8px;
 }
 
@@ -682,6 +725,10 @@ button {
   border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
+  /* Height is set from the content by the component; the handle would fight it. */
+  resize: none;
+  overflow-y: auto;
+  line-height: var(--line-height);
 }
 
 .selection-input::placeholder {

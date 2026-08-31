@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type { CommitReceipt, EditorState } from "../../shared/types.js";
+import type { CommitReceipt, EditorState, ProposalHandle } from "../../shared/types.js";
 
 const SERVER = fileURLToPath(new URL("../../dist/src/server.js", import.meta.url));
 
@@ -38,8 +38,18 @@ const call = (name: string, args: Record<string, unknown> = {}) =>
   client.callTool({ name, arguments: args }) as Promise<CallToolResult>;
 
 const state = (result: CallToolResult) => result.structuredContent as unknown as EditorState;
+const handle = (result: CallToolResult) => result.structuredContent as unknown as ProposalHandle;
 const text = (result: CallToolResult) =>
   (result.content as Array<{ text?: string }>).map((c) => c.text ?? "").join("\n");
+
+/** What the panel does on mount: trade the handle in for the state behind it. */
+const attach = async (proposalId: string) => state(await call("editor_attach", { proposalId }));
+
+/**
+ * The same state without attaching, for the tests that must stay unattached. A
+ * no-op update is what the panel sends anyway, so this exercises a real path.
+ */
+const peek = async (proposalId: string) => state(await call("editor_update", { proposalId }));
 
 /**
  * A tool that throws comes back as `isError: true` with the reason in the text,
@@ -54,7 +64,7 @@ async function refusal(name: string, args: Record<string, unknown>, pattern: Reg
 }
 
 async function openPanel(args: Record<string, unknown>): Promise<EditorState> {
-  return state(await call("propose_write", args));
+  return peek(handle(await call("propose_write", args)).proposalId);
 }
 
 const uiMeta = (tool: Tool) =>
@@ -120,11 +130,17 @@ describe("proposing", () => {
 
     expect(text(opened)).toMatch(/nothing has been written/i);
     expect(text(opened)).toContain("+hello");
-    expect(state(opened).proposal.mode).toBe("create");
+    expect(handle(opened).mode).toBe("create");
   });
 
   it("refuses a path outside the roots", async () => {
-    const escaped = await openPanel({ path: join(root, "..", "escape.txt"), content: "x" });
+    const opened = await call("propose_write", {
+      path: join(root, "..", "escape.txt"),
+      content: "x",
+    });
+    expect(handle(opened).refused).toBe(true);
+
+    const escaped = await peek(handle(opened).proposalId);
     expect(escaped.proposal.target.absolute).toBeNull();
     expect(escaped.findings.some((f) => f.rule === "path" && f.severity === "blocker")).toBe(true);
   });
@@ -135,12 +151,66 @@ describe("proposing", () => {
   });
 });
 
+/**
+ * `structuredContent` is read by the panel *and* by the model, so whatever an
+ * opening tool puts there is charged to the conversation on every proposal.
+ * Returning the whole `EditorState` billed the file three times over — content,
+ * originalContent and baseline — which is what these pin down.
+ */
+describe("what the opening tools cost the model", () => {
+  it("hands back a handle, not the file", async () => {
+    const target = join(root, "budget.txt");
+    const onDisk = `${Array.from({ length: 30 }, (_, i) => `existing line ${i}`).join("\n")}\n`;
+    await writeFile(target, onDisk, "utf8");
+
+    const opened = await call("propose_write", { path: target, content: `${onDisk}appended\n` });
+
+    const keys = Object.keys(opened.structuredContent!).sort();
+    expect(keys).toEqual(["display", "mode", "proposalId"]);
+    expect(JSON.stringify(opened.structuredContent)).not.toContain("existing line 0");
+  });
+
+  it("still gives the panel everything, on attach", async () => {
+    const target = join(root, "attach-gets-it-all.txt");
+    await writeFile(target, "on disk\n", "utf8");
+
+    const opened = await call("propose_write", { path: target, content: "proposed\n" });
+    const attached = await attach(handle(opened).proposalId);
+
+    expect(attached.proposal.baseline).toBe("on disk\n");
+    expect(attached.proposal.content).toBe("proposed\n");
+    expect(attached.diff.length).toBeGreaterThan(0);
+  });
+
+  it("caps the diff it prints back at the model", async () => {
+    const body = `${Array.from({ length: 500 }, (_, i) => `line ${i}`).join("\n")}\n`;
+    const opened = await call("propose_write", { path: join(root, "enormous.txt"), content: body });
+    const printed = text(opened);
+
+    expect(printed.split("\n").length).toBeLessThan(120);
+    expect(printed).toMatch(/more diff lines/);
+    expect(printed, "the head of the diff is still there").toContain("+line 0");
+    expect(printed, "the tail is not").not.toContain("+line 499");
+  });
+
+  it("says nothing about the file when the panel talks to itself", async () => {
+    const target = join(root, "panel-chatter.txt");
+    const opened = await call("propose_write", { path: target, content: "quiet\n" });
+    const id = handle(opened).proposalId;
+
+    expect(text(await call("editor_attach", { proposalId: id }))).not.toContain("quiet");
+    expect(text(await call("editor_update", { proposalId: id, content: "still quiet\n" }))).toBe(
+      "Updated.",
+    );
+  });
+});
+
 describe("opening a file to read and edit", () => {
   it("loads the current contents into the editor without writing", async () => {
     const target = join(root, "readme-me.txt");
     await writeFile(target, "on disk\n", "utf8");
 
-    const opened = state(await call("open_file", { path: target }));
+    const opened = await peek(handle(await call("open_file", { path: target })).proposalId);
 
     expect(opened.proposal.content).toBe("on disk\n");
     expect(opened.proposal.baseline).toBe("on disk\n");
@@ -148,13 +218,17 @@ describe("opening a file to read and edit", () => {
     expect(opened.proposal.mode).toBe("overwrite");
   });
 
-  it("keeps the file body out of the model's half of the result", async () => {
+  it("keeps the file body out of the whole result, not just the text half", async () => {
     const target = join(root, "private-ish.txt");
     await writeFile(target, "sentinel-contents-do-not-leak\n", "utf8");
 
     const opened = await call("open_file", { path: target });
 
     expect(text(opened)).not.toContain("sentinel-contents-do-not-leak");
+    expect(
+      JSON.stringify(opened.structuredContent),
+      "structuredContent reaches the model too",
+    ).not.toContain("sentinel-contents-do-not-leak");
     expect(text(opened)).toMatch(/Opened .* in the interactive editor/);
     expect(text(opened)).toMatch(/read_file/);
   });
@@ -163,10 +237,9 @@ describe("opening a file to read and edit", () => {
     const target = join(root, "opened-then-edited.txt");
     await writeFile(target, "before\n", "utf8");
 
-    const opened = state(await call("open_file", { path: target }));
-    const id = opened.proposal.proposalId;
+    const id = handle(await call("open_file", { path: target })).proposalId;
 
-    await call("editor_attach", { proposalId: id });
+    await attach(id);
     await call("editor_update", { proposalId: id, content: "after\n" });
     const receipt = state(
       await call("editor_commit", { proposalId: id }),
@@ -177,8 +250,9 @@ describe("opening a file to read and edit", () => {
   });
 
   it("refuses to open something outside the roots", async () => {
-    const opened = state(await call("open_file", { path: join(root, "..", "nope.txt") }));
-    expect(opened.proposal.target.absolute).toBeNull();
+    const opened = await call("open_file", { path: join(root, "..", "nope.txt") });
+    expect(handle(opened).refused).toBe(true);
+    expect((await peek(handle(opened).proposalId)).proposal.target.absolute).toBeNull();
   });
 });
 
@@ -197,7 +271,7 @@ describe("committing", () => {
     const opened = await openPanel({ path: target, content: "first line\n" });
     const id = opened.proposal.proposalId;
 
-    await call("editor_attach", { proposalId: id });
+    await attach(id);
     const receipt = state(
       await call("editor_commit", { proposalId: id }),
     ) as unknown as CommitReceipt;
@@ -212,7 +286,7 @@ describe("committing", () => {
     const opened = await openPanel({ path: target, content: "model wrote this\n" });
     const id = opened.proposal.proposalId;
 
-    await call("editor_attach", { proposalId: id });
+    await attach(id);
     await call("editor_update", { proposalId: id, content: "the human wrote this instead\n" });
     const receipt = state(
       await call("editor_commit", { proposalId: id }),
@@ -226,7 +300,7 @@ describe("committing", () => {
     const opened = await openPanel({ path: join(root, "once.txt"), content: "once\n" });
     const id = opened.proposal.proposalId;
 
-    await call("editor_attach", { proposalId: id });
+    await attach(id);
     await call("editor_commit", { proposalId: id });
     await refusal("editor_commit", { proposalId: id }, /already been resolved/i);
   });
@@ -253,7 +327,7 @@ describe("guarding the one-way door", () => {
     assert(blocker, "expected a large-deletion finding");
     expect(blocker.severity).toBe("blocker");
 
-    await call("editor_attach", { proposalId: id });
+    await attach(id);
     await refusal("editor_commit", { proposalId: id }, /Refusing to write/);
     expect(await readFile(target, "utf8"), "nothing may land while blocked").toBe(original);
 
@@ -272,7 +346,7 @@ describe("guarding the one-way door", () => {
 
     const opened = await openPanel({ path: target, content: "proposed\n" });
     const id = opened.proposal.proposalId;
-    await call("editor_attach", { proposalId: id });
+    await attach(id);
 
     await writeFile(target, "somebody else got here first\n", "utf8");
 
@@ -283,7 +357,7 @@ describe("guarding the one-way door", () => {
   it("blocks a retarget that lands outside the roots", async () => {
     const opened = await openPanel({ path: join(root, "movable.txt"), content: "content\n" });
     const id = opened.proposal.proposalId;
-    await call("editor_attach", { proposalId: id });
+    await attach(id);
 
     const retargeted = state(
       await call("editor_update", { proposalId: id, path: join(root, "..", "elsewhere.txt") }),
@@ -299,12 +373,12 @@ describe("deletion", () => {
     const target = join(root, "doomed.txt");
     await writeFile(target, "still here\n", "utf8");
 
-    const opened = state(await call("propose_delete", { path: target }));
-    const id = opened.proposal.proposalId;
+    const id = handle(await call("propose_delete", { path: target })).proposalId;
+    const opened = await peek(id);
 
     expect(opened.findings.find((f) => f.id === "delete")?.severity).toBe("blocker");
 
-    await call("editor_attach", { proposalId: id });
+    await attach(id);
     await refusal("editor_commit", { proposalId: id }, /Refusing to write/);
     expect(await readFile(target, "utf8")).toBe("still here\n");
 
@@ -339,7 +413,7 @@ describe("dry run", () => {
       name: "propose_write",
       arguments: { path: target, content: "not real\n" },
     })) as CallToolResult;
-    const id = (opened.structuredContent as unknown as EditorState).proposal.proposalId;
+    const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
 
     await dryClient.callTool({ name: "editor_attach", arguments: { proposalId: id } });
     const receipt = (await dryClient.callTool({

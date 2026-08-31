@@ -4,5 +4,14 @@
     "noEmit": true,
     "types": ["vitest/globals", "node"]
   },
-  "include": ["test/**/*.ts", "shared/**/*.ts", "src/**/*.ts", "scripts/**/*.mjs"]
+  // `ui/src/lib` only: those modules are pure by rule, so they typecheck under
+  // the server's config and can be unit tested. Anything in ui that touches the
+  // DOM or React stays out — `ui/tsconfig.json` owns that half.
+  "include": [
+    "test/**/*.ts",
+    "shared/**/*.ts",
+    "src/**/*.ts",
+    "ui/src/lib/**/*.ts",
+    "scripts/**/*.mjs"
+  ]
 }
