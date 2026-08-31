@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "interactive-editor": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/bundle/server/index.js", "--root", "${workspaceFolder}"]
+    }
+  }
+}

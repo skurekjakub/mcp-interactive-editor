@@ -155,6 +155,12 @@ Then add `.vscode/mcp.json` to your workspace, pointing at the clone:
 `${workspaceFolder}` is expanded by VS Code, so the root follows whatever project
 you have open. The path to the clone has to be absolute.
 
+This repository ships its own `.vscode/mcp.json` for dogfooding: open **this**
+clone in VS Code and the editor guards this project, running the `bundle/` that
+is already in the workspace — no absolute path needed. It is also the quickest
+way to see the panel at all, since VS Code renders MCP Apps and Claude Code does
+not.
+
 ### Claude Code — plugin marketplace
 
 ```bash

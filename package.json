@@ -11,6 +11,7 @@
     "build:ui": "vite build",
     "build:server": "tsc -p tsconfig.json",
     "bundle": "node scripts/bundle.mjs",
+    "bump": "node scripts/bump-version.mjs",
     "pack": "npm run bundle && mcpb pack bundle dist/mcp-interactive-editor.mcpb",
     "preview": "vite --port 5178",
     "pretest": "npm run build",
