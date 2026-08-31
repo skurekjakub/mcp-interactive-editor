@@ -118,6 +118,41 @@ malformed declaration rather than a permissive one. `--terminal-approval` is the
 documented, weaker opt-out. End-to-end tests walk the whole attack — propose,
 self-attach, commit — and assert the refusal. Do not weaken them.
 
+## A host may run two of these, and Claude Desktop does
+
+**Nothing may live only in this process's memory.**
+
+Claude Desktop starts every configured server from two managers that do not
+coordinate — `directMcpHost` and `LocalMcpServerManager` — and leaves both
+processes running for the life of the session. The model's tool call and the
+panel's tool calls can therefore be answered by different copies of this server.
+Held in a `Map`, a proposal opened by the first copy does not exist as far as the
+second one is concerned: the panel spins on a claim that can never succeed while
+the agent is told the id is unknown.
+
+That symptom is indistinguishable from a server restart, and the message used to
+say so, which sent everyone to restart an app that was working fine. It is a host
+bug, reported and closed unfixed, so this server has to survive it.
+
+Proposals live in `src/store.ts`, a directory under `tmpdir()` named for a hash of
+the settings the server was started with. Two siblings spawned from one host entry
+were given identical arguments, so they hash to the same directory and meet there.
+Servers started against different roots hash differently and stay apart — that
+part is load-bearing rather than tidy: a shared store across roots would let a
+server claim, and then write, a proposal for a directory it was never allowed to
+touch.
+
+Two consequences for anything you add:
+
+- **State that decides a write goes in the store, not in a module-level
+  variable.** `src/review.ts` is the exception that proves it — a blocking wait
+  is a promise held by the process that must return, so `--block-on-review` only
+  resolves where the opening call landed.
+- **A mutex has to be one the filesystem arbitrates.** The claim that stops one
+  approval being written twice is a directory created with `mkdir`, which fails
+  atomically when it already exists. A flag in memory guards one process and
+  reads exactly like it guards all of them.
+
 ## Do not make a tool call wait for the panel by default
 
 Blocking requires the host to keep forwarding the panel's own calls _during_ the
@@ -165,6 +200,11 @@ outside the repository**. The copy is the point: run in place and
 lost the flat-layout candidate would still pass while the shipped `.mcpb` served
 nothing. It also runs both the blocking and the default non-blocking mode,
 because only the second is what any install actually gets.
+
+It also spawns **two servers against one root** and drives the proposal from one
+while committing it from the other. Two clients on one process would pass against
+a store that shares nothing, which is the whole failure being guarded: only real
+processes can tell the difference.
 
 **Version lives in exactly two modules**: `src/version.ts` and
 `ui/src/lib/version.ts`, one per half. `npm run bump` rewrites both, and the panel
@@ -214,9 +254,18 @@ and `switch-exhaustiveness-check`, which catches a phase nobody handled.
 than usual — every exported symbol is one the comment policy has to document for
 a caller that does not exist.
 
-**Node 22 or newer.** `.nvmrc` and `engine-strict=true` in `.npmrc` enforce it;
-jsdom, undici and whatwg-url all require it, and an older Node runs the panel
+**The toolchain is pinned, and npm is pinned for a sharper reason than Node.**
+`.nvmrc`, `engines` and `engine-strict=true` in `.npmrc` enforce both. jsdom,
+undici and whatwg-url all need a recent Node, and an older one runs the panel
 suite on an unsupported runtime that works right up until it does not.
+
+npm is pinned because npm 10 and npm 11 resolve this tree's peer dependencies
+differently and write lockfiles the other refuses. The inspector brings its own
+nested Vite, which declares `esbuild` as a peer that the root copy does not
+satisfy; npm 10 installs that peer and npm 11 does not. Neither lockfile is
+wrong, and no single one satisfies both — a lockfile written on the wrong npm
+fails `npm ci` on every CI platform while passing locally. Match the pin rather
+than regenerating the lockfile to make an error go away.
 
 ## Which host gets you what
 

@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-31
+
+### Fixed
+
+- **The editor never opened in Claude Desktop: the panel sat on "Opening…"
+  and the agent was told its proposal id was unknown.** The message blamed a
+  server restart, so the advice was always to restart the app, and restarting
+  never helped. Nothing had restarted. Claude Desktop starts every configured
+  server from two managers that do not coordinate and leaves both processes
+  running, so the model's call and the panel's calls reach different copies of
+  the server — and a proposal the first copy is holding does not exist as far
+  as the second one is concerned. Proposals now live in a directory both copies
+  read, derived from the roots the server was started with, so it no longer
+  matters which copy answers.
+
+### Changed
+
+- **An approved proposal is written once even when two servers are asked to
+  write it.** The claim that made a second commit wait for the first was a flag
+  in one process's memory, which two processes do not share. It is now a
+  directory that `mkdir` creates atomically, so the filesystem refuses the second
+  caller. Servers started against different roots keep separate stores and cannot
+  see, or write, each other's proposals.
+
 ## [0.6.2] - 2026-08-31
 
 ### Added
@@ -638,6 +662,7 @@ First cut.
   MCP registry.
 
 [Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...HEAD
+[0.7.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...v0.6.1
 [0.5.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.1...v0.5.2

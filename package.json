@@ -1,6 +1,6 @@
 {
   "name": "mcp-interactive-editor",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "type": "module",
   "description": "An MCP App that opens an interactive editor for every file write a model proposes. You edit it by hand, and nothing reaches disk until you say so.",
   "scripts": {
@@ -61,8 +61,10 @@
     "vitest": "^3.2.7"
   },
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=22.0.0",
+    "npm": ">=11.0.0"
   },
+  "packageManager": "npm@11.16.0",
   "license": "MIT",
   "author": "skurekjakub",
   "keywords": [

@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { type Cli, HELP, parseArgs } from "./cli.js";
 import { FsGuard } from "./fsGuard.js";
 import { serveHttp } from "./http.js";
+import { configureStore, storePathFor } from "./store.js";
 import { registerTools } from "./tools/index.js";
 import { SERVER_VERSION } from "./version.js";
 
@@ -32,6 +33,18 @@ async function main(): Promise<void> {
   }
 
   const guard = new FsGuard({ roots: cli.roots, deny: cli.deny, dryRun: cli.dryRun });
+
+  /*
+   * Proposals live in a directory, not in this process.
+   *
+   * A host is free to spawn this server more than once and route different
+   * callers to different copies — Claude Desktop does, from two managers that
+   * do not coordinate. The model then opens a proposal in one process and the
+   * panel asks the other to attach to it. Deriving the directory from the
+   * settings makes the siblings meet, and keeps servers with different roots
+   * apart.
+   */
+  await configureStore(storePathFor({ roots: guard.roots, deny: cli.deny, dryRun: cli.dryRun }));
   const commitVisibility: Array<"model" | "app"> = cli.terminalApproval
     ? ["model", "app"]
     : ["app"];

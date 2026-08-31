@@ -67,11 +67,11 @@ export async function waitForReview(
 async function attachedWithin(proposalId: string, graceMs: number): Promise<boolean> {
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (getProposal(proposalId).attached) return true;
+    if ((await getProposal(proposalId)).attached) return true;
     if (!isAwaitingReview(proposalId)) return false;
     await new Promise((r) => setTimeout(r, ATTACH_POLL_MS));
   }
-  return getProposal(proposalId).attached;
+  return (await getProposal(proposalId)).attached;
 }
 
 /**

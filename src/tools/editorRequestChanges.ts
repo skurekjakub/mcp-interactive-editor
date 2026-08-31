@@ -34,7 +34,7 @@ export function registerEditorRequestChanges(server: McpServer, _context: ToolCo
       _meta: { ui: { visibility: ["app"] } },
     },
     async ({ proposalId, message }) => {
-      const proposal = getProposal(proposalId);
+      const proposal = await getProposal(proposalId);
 
       /*
        * Commenting is declining. There is no path where a draft lands *and*
@@ -45,7 +45,7 @@ export function registerEditorRequestChanges(server: McpServer, _context: ToolCo
        * Resolving also closes the door behind it, so a stale panel cannot come
        * back and commit content that was just rejected.
        */
-      resolveProposal(proposalId, "changes-requested");
+      await resolveProposal(proposalId, "changes-requested");
       const waited = resolveReview(proposalId, { kind: "changes-requested", message });
 
       return {

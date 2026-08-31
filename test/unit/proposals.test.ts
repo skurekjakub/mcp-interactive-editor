@@ -4,15 +4,16 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FsGuard } from "../../src/fsGuard.js";
 import {
-  clearProposals,
   createProposal,
   findOpenProposal,
   getProposal,
   openProposals,
   resolveProposal,
 } from "../../src/proposals.js";
+import { clearStore, configureStore } from "../../src/store.js";
 
 let root: string;
+let store: string;
 let guard: FsGuard;
 
 beforeAll(async () => {
@@ -22,14 +23,19 @@ beforeAll(async () => {
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(join(root, "a.txt"), "original\n", "utf8");
   guard = new FsGuard({ roots: [root], deny: [], dryRun: true });
+  // Outside the guarded root: the store is the server's own bookkeeping, and a
+  // fixture that could see it would be measuring the wrong directory.
+  store = await mkdtemp(join(tmpdir(), "proposal-store-"));
+  await configureStore(store);
 });
 
 afterAll(async () => {
   await rm(root, { recursive: true, force: true });
+  await rm(store, { recursive: true, force: true });
 });
 
-beforeEach(() => {
-  clearProposals();
+beforeEach(async () => {
+  await clearStore();
 });
 
 /** Open a write proposal against the fixture root. */
@@ -49,15 +55,15 @@ describe("two drafts of one file", () => {
 
     // Assert: both live would mean two approved writes to one file, the older
     // silently landing last and both reporting success.
-    expect(getProposal(first.proposalId).resolution).toBe("superseded");
-    expect(openProposals().map((p) => p.proposalId)).toEqual([second.proposalId]);
+    expect((await getProposal(first.proposalId)).resolution).toBe("superseded");
+    expect((await openProposals()).map((p) => p.proposalId)).toEqual([second.proposalId]);
   });
 
   it("leaves a proposal for a different file alone", async () => {
     const other = await propose(join(root, "src", "b.txt"), "b\n");
     await propose("a.txt", "a\n");
 
-    expect(getProposal(other.proposalId).resolvedAt).toBeUndefined();
+    expect((await getProposal(other.proposalId)).resolvedAt).toBeUndefined();
   });
 
   it("does not supersede across a path that was refused", async () => {
@@ -74,7 +80,7 @@ describe("two drafts of one file", () => {
       mode: "overwrite",
     });
 
-    expect(getProposal(first.proposalId).resolvedAt).toBeUndefined();
+    expect((await getProposal(first.proposalId)).resolvedAt).toBeUndefined();
   });
 });
 
@@ -82,13 +88,13 @@ describe("claiming a proposal by the path the host echoed back", () => {
   it("matches the exact spelling it was opened with", async () => {
     const opened = await propose("a.txt", "x\n");
 
-    expect(findOpenProposal("a.txt")?.proposalId).toBe(opened.proposalId);
+    expect((await findOpenProposal("a.txt"))?.proposalId).toBe(opened.proposalId);
   });
 
   it("matches an absolute spelling of a proposal opened relatively", async () => {
     const opened = await propose("a.txt", "x\n");
 
-    expect(findOpenProposal(join(root, "a.txt"))?.proposalId).toBe(opened.proposalId);
+    expect((await findOpenProposal(join(root, "a.txt")))?.proposalId).toBe(opened.proposalId);
   });
 
   it("matches a relative spelling of a proposal opened absolutely", async () => {
@@ -97,20 +103,20 @@ describe("claiming a proposal by the path the host echoed back", () => {
     // anchored it to the root.
     const opened = await propose(join(root, "src", "b.txt"), "x\n");
 
-    expect(findOpenProposal("src/b.txt")?.proposalId).toBe(opened.proposalId);
+    expect((await findOpenProposal("src/b.txt"))?.proposalId).toBe(opened.proposalId);
   });
 
   it("matches whichever separator the host chose", async () => {
     const opened = await propose(join(root, "src", "b.txt"), "x\n");
 
-    expect(findOpenProposal("src\\b.txt")?.proposalId).toBe(opened.proposalId);
+    expect((await findOpenProposal("src\\b.txt"))?.proposalId).toBe(opened.proposalId);
   });
 
   it("hands over the only open proposal when the path matches nothing", async () => {
     // A panel retrying a string it can never match dies on a loading screen.
     const opened = await propose("a.txt", "x\n");
 
-    expect(findOpenProposal("whatever-the-host-said")?.proposalId).toBe(opened.proposalId);
+    expect((await findOpenProposal("whatever-the-host-said"))?.proposalId).toBe(opened.proposalId);
   });
 
   it("guesses nothing when several are open and none match", async () => {
@@ -119,14 +125,14 @@ describe("claiming a proposal by the path the host echoed back", () => {
     await propose("a.txt", "x\n");
     await propose("src/b.txt", "y\n");
 
-    expect(findOpenProposal("no-such-file.txt")).toBeUndefined();
+    expect(await findOpenProposal("no-such-file.txt")).toBeUndefined();
   });
 
   it("skips a proposal that has already resolved", async () => {
     const opened = await propose("a.txt", "x\n");
-    resolveProposal(opened.proposalId, "discarded");
+    await resolveProposal(opened.proposalId, "discarded");
 
-    expect(findOpenProposal("a.txt")).toBeUndefined();
+    expect(await findOpenProposal("a.txt")).toBeUndefined();
   });
 });
 
@@ -134,7 +140,7 @@ describe("retention", () => {
   it("keeps every open proposal reachable up to the limit", async () => {
     for (let i = 0; i < 32; i += 1) await propose(`src/f${i}.txt`, "x\n");
 
-    expect(openProposals()).toHaveLength(32);
+    expect(await openProposals()).toHaveLength(32);
   });
 
   it("tells a panel its proposal was superseded rather than that the id is unknown", async () => {
@@ -144,14 +150,14 @@ describe("retention", () => {
 
     // Act & Assert: "unknown proposal" reads as a server restart, which is a
     // different problem with a different fix.
-    expect(() => getProposal(first.proposalId)).toThrow(/superseded to make room/);
+    await expect(getProposal(first.proposalId)).rejects.toThrow(/superseded to make room/);
   });
 
-  it("tells a panel that outlived the server what to do about it", () => {
+  it("tells a panel that outlived the server what to do about it", async () => {
     // A host restarts the server when the extension is updated, and every panel
     // already on screen holds an id the new process never issued. Saying only
     // that the id is unknown leaves a dead panel and no next step.
-    expect(() => getProposal("11111111-2222-3333-4444-555555555555")).toThrow(
+    await expect(getProposal("11111111-2222-3333-4444-555555555555")).rejects.toThrow(
       /earlier run of the server[\s\S]*ask for the write again/i,
     );
   });
@@ -160,10 +166,10 @@ describe("retention", () => {
     const keep = await propose("src/keep.txt", "x\n");
     for (let i = 0; i < 40; i += 1) {
       const spent = await propose(`src/spent${i}.txt`, "x\n");
-      resolveProposal(spent.proposalId, "discarded");
+      await resolveProposal(spent.proposalId, "discarded");
     }
 
-    expect(getProposal(keep.proposalId).resolvedAt).toBeUndefined();
+    expect((await getProposal(keep.proposalId)).resolvedAt).toBeUndefined();
   });
 });
 

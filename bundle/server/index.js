@@ -9869,8 +9869,8 @@ var init_to_json_schema = __esm({
           // uri: _params?.uri ?? ((id) => `${id}`),
           external: _params?.external ?? void 0
         };
-        const root = this.seen.get(schema);
-        if (!root)
+        const root2 = this.seen.get(schema);
+        if (!root2)
           throw new Error("Unprocessed schema. This is a bug in Zod.");
         const makeURI = (entry) => {
           const defsSegment = this.target === "draft-2020-12" ? "$defs" : "definitions";
@@ -9884,7 +9884,7 @@ var init_to_json_schema = __esm({
             entry[1].defId = id;
             return { defId: id, ref: `${uriGenerator("__shared")}#/${defsSegment}/${id}` };
           }
-          if (entry[1] === root) {
+          if (entry[1] === root2) {
             return { ref: "#" };
           }
           const uriPrefix = `#`;
@@ -9990,7 +9990,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
             throw new Error("Schema is missing an `id` property");
           result.$id = params.external.uri(id);
         }
-        Object.assign(result, root.def);
+        Object.assign(result, root2.def);
         const defs = params.external?.defs ?? {};
         for (const entry of this.seen.entries()) {
           const seen = entry[1];
@@ -14594,22 +14594,22 @@ var require_compile = __commonJS({
       }
     }
     exports.compileSchema = compileSchema;
-    function resolveRef(root, baseId, ref) {
+    function resolveRef(root2, baseId, ref) {
       var _a;
       ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
-      const schOrFunc = root.refs[ref];
+      const schOrFunc = root2.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve4.call(this, root2, ref);
       if (_sch === void 0) {
-        const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
+        const schema = (_a = root2.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
         if (schema)
-          _sch = new SchemaEnv({ schema, schemaId, root, baseId });
+          _sch = new SchemaEnv({ schema, schemaId, root: root2, baseId });
       }
       if (_sch === void 0)
         return;
-      return root.refs[ref] = inlineOrCompile.call(this, _sch);
+      return root2.refs[ref] = inlineOrCompile.call(this, _sch);
     }
     exports.resolveRef = resolveRef;
     function inlineOrCompile(sch) {
@@ -14627,23 +14627,23 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve4(root2, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
-      return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
+      return sch || this.schemas[ref] || resolveSchema.call(this, root2, ref);
     }
-    function resolveSchema(root, ref) {
+    function resolveSchema(root2, ref) {
       const p2 = this.opts.uriResolver.parse(ref);
       const refPath = (0, resolve_1._getFullPath)(this.opts.uriResolver, p2);
-      let baseId = (0, resolve_1.getFullPath)(this.opts.uriResolver, root.baseId, void 0);
-      if (Object.keys(root.schema).length > 0 && refPath === baseId) {
-        return getJsonPointer.call(this, p2, root);
+      let baseId = (0, resolve_1.getFullPath)(this.opts.uriResolver, root2.baseId, void 0);
+      if (Object.keys(root2.schema).length > 0 && refPath === baseId) {
+        return getJsonPointer.call(this, p2, root2);
       }
       const id = (0, resolve_1.normalizeId)(refPath);
       const schOrRef = this.refs[id] || this.schemas[id];
       if (typeof schOrRef == "string") {
-        const sch = resolveSchema.call(this, root, schOrRef);
+        const sch = resolveSchema.call(this, root2, schOrRef);
         if (typeof (sch === null || sch === void 0 ? void 0 : sch.schema) !== "object")
           return;
         return getJsonPointer.call(this, p2, sch);
@@ -14658,7 +14658,7 @@ var require_compile = __commonJS({
         const schId = schema[schemaId];
         if (schId)
           baseId = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schId);
-        return new SchemaEnv({ schema, schemaId, root, baseId });
+        return new SchemaEnv({ schema, schemaId, root: root2, baseId });
       }
       return getJsonPointer.call(this, p2, schOrRef);
     }
@@ -14670,7 +14670,7 @@ var require_compile = __commonJS({
       "dependencies",
       "definitions"
     ]);
-    function getJsonPointer(parsedRef, { baseId, schema, root }) {
+    function getJsonPointer(parsedRef, { baseId, schema, root: root2 }) {
       var _a;
       if (((_a = parsedRef.fragment) === null || _a === void 0 ? void 0 : _a[0]) !== "/")
         return;
@@ -14689,10 +14689,10 @@ var require_compile = __commonJS({
       let env;
       if (typeof schema != "boolean" && schema.$ref && !(0, util_1.schemaHasRulesButRef)(schema, this.RULES)) {
         const $ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schema.$ref);
-        env = resolveSchema.call(this, root, $ref);
+        env = resolveSchema.call(this, root2, $ref);
       }
       const { schemaId } = this.opts;
-      env = env || new SchemaEnv({ schema, schemaId, root, baseId });
+      env = env || new SchemaEnv({ schema, schemaId, root: root2, baseId });
       if (env.schema !== env.root.schema)
         return env;
       return void 0;
@@ -16119,8 +16119,8 @@ var require_core = __commonJS({
           keyRef = sch;
         if (sch === void 0) {
           const { schemaId } = this.opts;
-          const root = new compile_1.SchemaEnv({ schema: {}, schemaId });
-          sch = compile_1.resolveSchema.call(this, root, keyRef);
+          const root2 = new compile_1.SchemaEnv({ schema: {}, schemaId });
+          sch = compile_1.resolveSchema.call(this, root2, keyRef);
           if (!sch)
             return;
           this.refs[keyRef] = sch;
@@ -16481,20 +16481,20 @@ var require_ref = __commonJS({
       code(cxt) {
         const { gen, schema: $ref, it } = cxt;
         const { baseId, schemaEnv: env, validateName, opts, self } = it;
-        const { root } = env;
-        if (($ref === "#" || $ref === "#/") && baseId === root.baseId)
+        const { root: root2 } = env;
+        if (($ref === "#" || $ref === "#/") && baseId === root2.baseId)
           return callRootRef();
-        const schOrEnv = compile_1.resolveRef.call(self, root, baseId, $ref);
+        const schOrEnv = compile_1.resolveRef.call(self, root2, baseId, $ref);
         if (schOrEnv === void 0)
           throw new ref_error_1.default(it.opts.uriResolver, baseId, $ref);
         if (schOrEnv instanceof compile_1.SchemaEnv)
           return callValidate(schOrEnv);
         return inlineRefSchema(schOrEnv);
         function callRootRef() {
-          if (env === root)
+          if (env === root2)
             return callRef(cxt, validateName, env, env.$async);
-          const rootName = gen.scopeValue("root", { ref: root });
-          return callRef(cxt, (0, codegen_1._)`${rootName}.validate`, root, root.$async);
+          const rootName = gen.scopeValue("root", { ref: root2 });
+          return callRef(cxt, (0, codegen_1._)`${rootName}.validate`, root2, root2.$async);
         }
         function callValidate(sch) {
           const v2 = getValidate(cxt, sch);
@@ -28859,12 +28859,12 @@ var FsGuard = class {
     if (this.canonicalRoots) return this.canonicalRoots;
     let complete = true;
     const resolved = await Promise.all(
-      this.roots.map(async (root) => {
+      this.roots.map(async (root2) => {
         try {
-          return await realpath(root);
+          return await realpath(root2);
         } catch {
           complete = false;
-          return root;
+          return root2;
         }
       })
     );
@@ -28904,9 +28904,9 @@ var FsGuard = class {
     } catch {
       return rejected("unresolvable");
     }
-    const root = roots.find((r2) => contains(r2, real)) ?? null;
-    if (!root) return rejected("outside-roots");
-    const rel = relative(root, real);
+    const root2 = roots.find((r2) => contains(r2, real)) ?? null;
+    if (!root2) return rejected("outside-roots");
+    const rel = relative(root2, real);
     const deniedBy = this.deniedBy(rel);
     if (deniedBy) return rejected("denied", deniedBy);
     let exists = false;
@@ -28930,7 +28930,7 @@ var FsGuard = class {
       requested,
       absolute: real,
       display: toPosix(rel) || toPosix(real),
-      root,
+      root: root2,
       exists,
       onDisk
     };
@@ -31746,19 +31746,101 @@ function composeState(proposal, context) {
   };
 }
 
+// src/store.ts
+import { createHash as createHash2 } from "node:crypto";
+import { mkdir as mkdir2, readFile as readFile3, readdir, rename as rename2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as join2 } from "node:path";
+var SCHEMA = "v1";
+var root;
+function storePathFor(identity) {
+  const canonical = JSON.stringify({
+    roots: [...identity.roots].sort(),
+    deny: [...identity.deny].sort(),
+    dryRun: identity.dryRun
+  });
+  const key = createHash2("sha256").update(canonical, "utf8").digest("hex").slice(0, 16);
+  return join2(tmpdir(), "mcp-interactive-editor", `${SCHEMA}-${key}`);
+}
+async function configureStore(at) {
+  root = at;
+  await mkdir2(join2(at, "proposals"), { recursive: true, mode: 448 });
+  await mkdir2(join2(at, "locks"), { recursive: true, mode: 448 });
+  await mkdir2(join2(at, "tombstones"), { recursive: true, mode: 448 });
+}
+function dir() {
+  if (!root) throw new Error("The proposal store was used before it was configured.");
+  return root;
+}
+function fileFor(proposalId) {
+  return join2(dir(), "proposals", `${proposalId}.json`);
+}
+async function readProposal(proposalId) {
+  if (!/^[0-9a-f-]{36}$/i.test(proposalId)) return void 0;
+  try {
+    return JSON.parse(await readFile3(fileFor(proposalId), "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+async function writeProposal(proposal) {
+  const target = fileFor(proposal.proposalId);
+  const temp = `${target}.${process.pid}.tmp`;
+  await writeFile2(temp, JSON.stringify(proposal), { encoding: "utf8", mode: 384 });
+  await rename2(temp, target);
+}
+async function allProposals() {
+  let names;
+  try {
+    names = await readdir(join2(dir(), "proposals"));
+  } catch {
+    return [];
+  }
+  const found = await Promise.all(
+    names.filter((n) => n.endsWith(".json")).map((n) => readProposal(n.slice(0, -".json".length)))
+  );
+  return found.filter((p2) => p2 !== void 0).sort((a, b) => a.createdAt - b.createdAt);
+}
+async function deleteProposal(proposalId) {
+  await rm2(fileFor(proposalId), { force: true });
+}
+async function claimForCommit(proposalId) {
+  try {
+    await mkdir2(join2(dir(), "locks", proposalId), { mode: 448 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function releaseCommit(proposalId) {
+  await rm2(join2(dir(), "locks", proposalId), { recursive: true, force: true });
+}
+async function writeTombstone(proposalId, resolution) {
+  await writeFile2(join2(dir(), "tombstones", proposalId), resolution, {
+    encoding: "utf8",
+    mode: 384
+  });
+}
+async function readTombstone(proposalId) {
+  if (!/^[0-9a-f-]{36}$/i.test(proposalId)) return void 0;
+  try {
+    return await readFile3(join2(dir(), "tombstones", proposalId), "utf8");
+  } catch {
+    return void 0;
+  }
+}
+
 // src/version.ts
-var SERVER_VERSION = "0.6.2";
+var SERVER_VERSION = "0.7.0";
 
 // src/proposals.ts
-var proposals = /* @__PURE__ */ new Map();
 var MAX_RETAINED = 32;
 var PROPOSAL_TTL_MS = 60 * 60 * 1e3;
-var evicted = /* @__PURE__ */ new Map();
 async function createProposal(guard, input) {
   const target = input.target ?? await guard.describe(input.path);
   const baseline = input.target && input.baseline !== void 0 ? input.baseline : target.absolute && target.exists ? await guard.read(target.absolute) : "";
-  for (const open of openProposals()) {
-    if (sameTarget(open.target, target)) resolveProposal(open.proposalId, "superseded");
+  for (const open of await openProposals()) {
+    if (sameTarget(open.target, target)) await resolveProposal(open.proposalId, "superseded");
   }
   const proposal = {
     proposalId: randomUUID2(),
@@ -31772,38 +31854,36 @@ async function createProposal(guard, input) {
     destructiveAcknowledged: false,
     createdAt: Date.now()
   };
-  proposals.set(proposal.proposalId, proposal);
-  evict();
+  await writeProposal(proposal);
+  await evict();
   return proposal;
 }
-function getProposal(proposalId) {
-  const proposal = proposals.get(proposalId);
-  if (!proposal) {
-    const ended = evicted.get(proposalId);
-    if (ended) {
-      throw new Error(`This proposal was ${ended} to make room for newer ones. Open a new one.`);
-    }
-    throw new Error(
-      `Unknown proposal ${proposalId}. This panel belongs to an earlier run of the server \u2014 it was probably restarted, which happens when the extension is installed or updated. The draft is gone with it; ask for the write again to get a fresh panel.`
-    );
+async function getProposal(proposalId) {
+  const proposal = await readProposal(proposalId);
+  if (proposal) return proposal;
+  const ended = await readTombstone(proposalId);
+  if (ended) {
+    throw new Error(`This proposal was ${ended} to make room for newer ones. Open a new one.`);
   }
-  return proposal;
+  throw new Error(
+    `Unknown proposal ${proposalId}. This panel belongs to an earlier run of the server \u2014 it was probably restarted, which happens when the extension is installed or updated. The draft is gone with it; ask for the write again to get a fresh panel.`
+  );
 }
-function updateProposal(proposalId, patch) {
-  const current = getProposal(proposalId);
+async function updateProposal(proposalId, patch) {
+  const current = await getProposal(proposalId);
   if (current.resolvedAt) {
     throw new Error(
       `This proposal was already ${current.resolution ?? "resolved"}. Open a new one.`
     );
   }
   const next = { ...current, ...patch, proposalId: current.proposalId };
-  proposals.set(proposalId, next);
+  await writeProposal(next);
   return next;
 }
-function resolveProposal(proposalId, resolution) {
-  const current = getProposal(proposalId);
+async function resolveProposal(proposalId, resolution) {
+  const current = await getProposal(proposalId);
   const next = { ...current, resolvedAt: (/* @__PURE__ */ new Date()).toISOString(), resolution };
-  proposals.set(proposalId, next);
+  await writeProposal(next);
   return next;
 }
 async function restatTarget(guard, proposal) {
@@ -31821,8 +31901,8 @@ function buildEditorState(guard, proposal) {
     serverVersion: SERVER_VERSION
   });
 }
-function findOpenProposal(path) {
-  const open = openProposals();
+async function findOpenProposal(path) {
+  const open = await openProposals();
   if (open.length === 0) return void 0;
   if (path === void 0) return open[open.length - 1];
   const exact = open.filter((p2) => p2.target.requested === path);
@@ -31846,23 +31926,20 @@ function namesTarget(target, path) {
   const absolute = forCompare(target.absolute);
   return absolute === wanted || absolute.endsWith(`/${wanted}`);
 }
-function openProposals() {
+async function openProposals() {
   const cutoff = Date.now() - PROPOSAL_TTL_MS;
-  return [...proposals.values()].filter((p2) => !p2.resolvedAt && p2.createdAt >= cutoff);
+  return (await allProposals()).filter((p2) => !p2.resolvedAt && p2.createdAt >= cutoff);
 }
-function evict() {
-  if (proposals.size <= MAX_RETAINED) return;
+async function evict() {
+  const held = await allProposals();
+  if (held.length <= MAX_RETAINED) return;
   const cutoff = Date.now() - PROPOSAL_TTL_MS;
-  for (const [id, proposal] of proposals) {
-    if (proposals.size <= MAX_RETAINED) return;
-    if (proposal.resolvedAt || proposal.createdAt < cutoff) proposals.delete(id);
-  }
-  while (proposals.size > MAX_RETAINED) {
-    const oldest = proposals.keys().next().value;
-    if (oldest === void 0) break;
-    const doomed = proposals.get(oldest);
-    if (doomed && !doomed.resolvedAt) evicted.set(oldest, "superseded");
-    proposals.delete(oldest);
+  const spent = held.filter((p2) => p2.resolvedAt || p2.createdAt < cutoff);
+  const live = held.filter((p2) => !spent.includes(p2));
+  const doomed = [...spent, ...live].slice(0, held.length - MAX_RETAINED);
+  for (const proposal of doomed) {
+    if (!proposal.resolvedAt) await writeTombstone(proposal.proposalId, "superseded");
+    await deleteProposal(proposal.proposalId);
   }
 }
 
@@ -31978,11 +32055,11 @@ async function waitForReview(context, proposalId, opened) {
 async function attachedWithin(proposalId, graceMs) {
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (getProposal(proposalId).attached) return true;
+    if ((await getProposal(proposalId)).attached) return true;
     if (!isAwaitingReview(proposalId)) return false;
     await new Promise((r2) => setTimeout(r2, ATTACH_POLL_MS));
   }
-  return getProposal(proposalId).attached;
+  return (await getProposal(proposalId)).attached;
 }
 function describeOutcome(outcome, opened) {
   switch (outcome.kind) {
@@ -32142,8 +32219,8 @@ function registerEditorAttach(server, { guard }) {
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId }) => {
-      const { target, baseline } = await restatTarget(guard, getProposal(proposalId));
-      const proposal = updateProposal(proposalId, { target, baseline, attached: true });
+      const { target, baseline } = await restatTarget(guard, await getProposal(proposalId));
+      const proposal = await updateProposal(proposalId, { target, baseline, attached: true });
       return panelResult(
         buildEditorState(guard, proposal),
         "Attached. The panel has the proposal."
@@ -32169,7 +32246,7 @@ function registerEditorUpdate(server, { guard }) {
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId, content, destructiveAcknowledged }) => {
-      const next = updateProposal(proposalId, {
+      const next = await updateProposal(proposalId, {
         ...content !== void 0 ? { content } : {},
         ...destructiveAcknowledged !== void 0 ? { destructiveAcknowledged } : {}
       });
@@ -32180,21 +32257,23 @@ function registerEditorUpdate(server, { guard }) {
 
 // src/tools/commit.ts
 async function commit(context, proposalId) {
-  const before = getProposal(proposalId);
-  if (before.resolvedAt) {
-    throw new Error(`This proposal was already ${before.resolution ?? "resolved"}.`);
+  const opening = await getProposal(proposalId);
+  if (opening.resolvedAt) {
+    throw new Error(`This proposal was already ${opening.resolution ?? "resolved"}.`);
   }
-  if (committing.has(proposalId)) {
+  if (!await claimForCommit(proposalId)) {
     throw new Error("This proposal is already being written. Wait for that to finish.");
   }
-  committing.add(proposalId);
   try {
+    const before = await getProposal(proposalId);
+    if (before.resolvedAt) {
+      throw new Error(`This proposal was already ${before.resolution ?? "resolved"}.`);
+    }
     return await write(context, proposalId, before);
   } finally {
-    committing.delete(proposalId);
+    await releaseCommit(proposalId);
   }
 }
-var committing = /* @__PURE__ */ new Set();
 async function write(context, proposalId, before) {
   const { guard } = context;
   if (!context.terminalApproval && !context.canRenderPanel()) {
@@ -32212,12 +32291,12 @@ async function write(context, proposalId, before) {
     throw new Error(`${target.requested} is not a writable path.`);
   }
   if (isStale(baseline, baselineAtOpen)) {
-    resolveProposal(proposalId, "superseded");
+    await resolveProposal(proposalId, "superseded");
     throw new Error(
       `${target.display} changed on disk while the editor was open. The diff that was approved is not the diff that would be applied. This proposal is closed; open a new one against the current file.`
     );
   }
-  const proposal = updateProposal(proposalId, { target, baseline });
+  const proposal = await updateProposal(proposalId, { target, baseline });
   const findings = buildEditorState(guard, proposal).findings;
   if (hasBlockers(findings)) {
     const blockers = findings.filter((f2) => f2.severity === "blocker").map((f2) => f2.message);
@@ -32225,7 +32304,7 @@ async function write(context, proposalId, before) {
 ${blockers.map((b) => `  - ${b}`).join("\n")}`);
   }
   const result = proposal.mode === "delete" ? (await guard.remove(absolute), { bytes: 0, sha256: sha256("") }) : await guard.commit(absolute, proposal.content, proposal.target.onDisk?.mode);
-  resolveProposal(proposalId, "committed");
+  await resolveProposal(proposalId, "committed");
   return {
     ok: true,
     path: absolute,
@@ -32281,8 +32360,8 @@ function registerEditorDiscard(server, _context) {
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId, reason }) => {
-      const proposal = getProposal(proposalId);
-      resolveProposal(proposalId, "discarded");
+      const proposal = await getProposal(proposalId);
+      await resolveProposal(proposalId, "discarded");
       const delivered = resolveReview(proposalId, {
         kind: "discarded",
         ...reason ? { reason } : {}
@@ -32321,8 +32400,8 @@ function registerEditorRequestChanges(server, _context) {
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId, message }) => {
-      const proposal = getProposal(proposalId);
-      resolveProposal(proposalId, "changes-requested");
+      const proposal = await getProposal(proposalId);
+      await resolveProposal(proposalId, "changes-requested");
       const waited = resolveReview(proposalId, { kind: "changes-requested", message });
       return {
         content: [
@@ -32356,9 +32435,9 @@ function registerEditorPending(server, { guard }) {
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ path }) => {
-      const proposal = findOpenProposal(path);
+      const proposal = await findOpenProposal(path);
       if (!proposal) {
-        const open = openProposals();
+        const open = await openProposals();
         return {
           content: [
             {
@@ -32580,6 +32659,7 @@ ${HELP}`);
     process.exit(2);
   }
   const guard = new FsGuard({ roots: cli.roots, deny: cli.deny, dryRun: cli.dryRun });
+  await configureStore(storePathFor({ roots: guard.roots, deny: cli.deny, dryRun: cli.dryRun }));
   const commitVisibility = cli.terminalApproval ? ["model", "app"] : ["app"];
   const toolOptions = {
     commitVisibility,

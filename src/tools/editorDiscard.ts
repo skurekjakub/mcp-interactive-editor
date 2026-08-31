@@ -28,8 +28,8 @@ export function registerEditorDiscard(server: McpServer, _context: ToolContext):
       _meta: { ui: { visibility: ["app"] } },
     },
     async ({ proposalId, reason }) => {
-      const proposal = getProposal(proposalId);
-      resolveProposal(proposalId, "discarded");
+      const proposal = await getProposal(proposalId);
+      await resolveProposal(proposalId, "discarded");
       const delivered = resolveReview(proposalId, {
         kind: "discarded",
         ...(reason ? { reason } : {}),

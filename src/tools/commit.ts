@@ -10,6 +10,7 @@ import {
   restatTarget,
   updateProposal,
 } from "../proposals.js";
+import { claimForCommit, releaseCommit } from "../store.js";
 import type { ToolContext } from "./context.js";
 
 /**
@@ -27,40 +28,40 @@ import type { ToolContext } from "./context.js";
  * @gate Carries the "nobody commits what nobody saw" invariant.
  */
 export async function commit(context: ToolContext, proposalId: string): Promise<CommitReceipt> {
-  const before = getProposal(proposalId);
-
-  if (before.resolvedAt) {
-    throw new Error(`This proposal was already ${before.resolution ?? "resolved"}.`);
+  const opening = await getProposal(proposalId);
+  if (opening.resolvedAt) {
+    throw new Error(`This proposal was already ${opening.resolution ?? "resolved"}.`);
   }
 
   /*
-   * Claim the proposal before the first await.
+   * Claim the proposal before anything else.
    *
-   * `resolvedAt` is not set until the write has finished, four awaits below, so
-   * two calls arriving together both read it as unset and both go on to write.
-   * On POSIX the second rename overwrites the first atomically: one approved
-   * proposal, two writes, two receipts saying it landed. Claiming synchronously
-   * is what makes the check mean what it reads as, and the panel's own busy flag
-   * cannot do it — that is React state, set a tick later than the click.
+   * `resolvedAt` is not set until the write has finished, several awaits below,
+   * so two calls arriving together both read it as unset and both go on to
+   * write. On POSIX the second rename overwrites the first atomically: one
+   * approved proposal, two writes, two receipts saying it landed.
+   *
+   * The claim is a directory rather than a flag in memory because the second
+   * caller is routinely in a different process — a host may run two copies of
+   * this server and hand them the same proposal. `mkdir` is the arbiter both
+   * processes share, and the panel's own busy flag could not do this job even
+   * within one: that is React state, set a tick later than the click.
    */
-  if (committing.has(proposalId)) {
+  if (!(await claimForCommit(proposalId))) {
     throw new Error("This proposal is already being written. Wait for that to finish.");
   }
-  committing.add(proposalId);
   try {
+    // Re-read under the claim. Between the check above and the claim, the other
+    // holder may have finished, and its receipt is the one that counts.
+    const before = await getProposal(proposalId);
+    if (before.resolvedAt) {
+      throw new Error(`This proposal was already ${before.resolution ?? "resolved"}.`);
+    }
     return await write(context, proposalId, before);
   } finally {
-    committing.delete(proposalId);
+    await releaseCommit(proposalId);
   }
 }
-
-/**
- * Proposals with a write in flight.
- *
- * Held for the duration of {@link commit} so a second entrant is refused rather
- * than racing the first to `rename`.
- */
-const committing = new Set<string>();
 
 /**
  * Performs the write, once the proposal has been claimed.
@@ -121,7 +122,7 @@ async function write(
    * proposal against what is now on disk.
    */
   if (isStale(baseline, baselineAtOpen)) {
-    resolveProposal(proposalId, "superseded");
+    await resolveProposal(proposalId, "superseded");
     throw new Error(
       `${target.display} changed on disk while the editor was open. ` +
         "The diff that was approved is not the diff that would be applied. " +
@@ -129,7 +130,7 @@ async function write(
     );
   }
 
-  const proposal = updateProposal(proposalId, { target, baseline });
+  const proposal = await updateProposal(proposalId, { target, baseline });
 
   const findings = buildEditorState(guard, proposal).findings;
   if (hasBlockers(findings)) {
@@ -142,7 +143,7 @@ async function write(
       ? (await guard.remove(absolute), { bytes: 0, sha256: sha256("") })
       : await guard.commit(absolute, proposal.content, proposal.target.onDisk?.mode);
 
-  resolveProposal(proposalId, "committed");
+  await resolveProposal(proposalId, "committed");
 
   return {
     ok: true,
