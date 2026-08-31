@@ -5,21 +5,34 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ClientCapabilities, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { EXTENSION_ID, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import type { CommitReceipt, EditorState, ProposalHandle } from "../../shared/types.js";
 
 const SERVER = fileURLToPath(new URL("../../dist/src/server.js", import.meta.url));
 
+/**
+ * What a host that actually renders MCP Apps declares at initialize. The commit
+ * path asks for this, so the default test client has to look like a real host —
+ * and the tests that check the refusal deliberately do not.
+ */
+const RENDERS_PANEL = {
+  extensions: { [EXTENSION_ID]: { mimeTypes: [RESOURCE_MIME_TYPE] } },
+} as unknown as ClientCapabilities;
+
+/** A terminal agent: every tool reaches the model, and no panel ever appears. */
+const NO_PANEL: ClientCapabilities = {};
+
 let root: string;
 let client: Client;
 
-async function connect(args: string[]): Promise<Client> {
+async function connect(args: string[], capabilities = RENDERS_PANEL): Promise<Client> {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [SERVER, ...args],
     stderr: "ignore",
   });
-  const connected = new Client({ name: "editor-tests", version: "1.0.0" }, { capabilities: {} });
+  const connected = new Client({ name: "editor-tests", version: "1.0.0" }, { capabilities });
   await connected.connect(transport);
   return connected;
 }
@@ -400,6 +413,62 @@ describe("reading", () => {
   it("lists its roots", async () => {
     const listed = await call("list_roots", {});
     expect((listed.structuredContent as { roots: string[] }).roots).toEqual([root]);
+  });
+});
+
+/**
+ * The failure that matters most, because it is the one the marketing claim rests
+ * on. `visibility: ["app"]` is a request to the host, not a guarantee: a host
+ * that does not implement MCP Apps hands `editor_attach` to the agent too, so
+ * `attached` alone is a flag the agent can set about itself. What it cannot
+ * author is the capability its own client declared at initialize.
+ */
+describe("a host that cannot render the panel", () => {
+  it("refuses to commit, because nobody ever saw the diff", async () => {
+    const blindRoot = await mkdtemp(join(tmpdir(), "interactive-editor-blind-"));
+    const blind = await connect(["--root", blindRoot], NO_PANEL);
+    const target = join(blindRoot, "unseen.txt");
+
+    const opened = (await blind.callTool({
+      name: "propose_write",
+      arguments: { path: target, content: "never reviewed\n" },
+    })) as CallToolResult;
+    const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+
+    // The agent can reach the app-only tool in such a host. That is the problem,
+    // and marking itself attached must not be enough to get through the door.
+    await blind.callTool({ name: "editor_attach", arguments: { proposalId: id } });
+    const committed = (await blind.callTool({
+      name: "editor_commit",
+      arguments: { proposalId: id },
+    })) as CallToolResult;
+
+    expect(committed.isError, "a commit with no panel must be refused").toBe(true);
+    expect(text(committed)).toMatch(/does not render MCP Apps/i);
+    await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
+
+    await blind.close();
+    await rm(blindRoot, { recursive: true, force: true });
+  });
+
+  it("writes anyway once --terminal-approval makes the client's prompt the gate", async () => {
+    const optedIn = await mkdtemp(join(tmpdir(), "interactive-editor-terminal-"));
+    const terminal = await connect(["--root", optedIn, "--terminal-approval"], NO_PANEL);
+    const target = join(optedIn, "approved.txt");
+
+    const opened = (await terminal.callTool({
+      name: "propose_write",
+      arguments: { path: target, content: "opted in\n" },
+    })) as CallToolResult;
+    const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+
+    await terminal.callTool({ name: "editor_attach", arguments: { proposalId: id } });
+    await terminal.callTool({ name: "editor_commit", arguments: { proposalId: id } });
+
+    expect(await readFile(target, "utf8")).toBe("opted in\n");
+
+    await terminal.close();
+    await rm(optedIn, { recursive: true, force: true });
   });
 });
 

@@ -184,9 +184,18 @@ MCP Apps need a rendering surface. This is the actual state of play:
 | **Claude Code / any terminal agent** | ❌      | ❌      | ❌ by default |
 
 In a terminal host, `propose_write` still works and still returns the diff as
-text, so the agent sees what it proposed. But the editor can never render, so it
-can never attach, so **nothing can be committed**. That is the correct failure —
-it degrades to a hard stop, not an open gate.
+text, so the agent sees what it proposed, and **nothing can be committed** — but
+not for the reason it would be comfortable to assume.
+
+`visibility: ["app"]` is a request to the host, not a guarantee. A host with no
+MCP Apps support hands the agent every tool, `editor_attach` among them, so the
+agent can mark its own proposal as attached and `attached` alone secures
+nothing. What an agent cannot author is the capabilities its own client
+declared at initialize, so that is what the commit path asks: if the host never
+advertised that it renders `text/html;profile=mcp-app`, no panel ever appeared,
+nobody saw the diff, and the write is refused. It degrades to a hard stop, not
+an open gate — and there is an end-to-end test that walks the whole attack
+(propose, self-attach, commit) to prove it.
 
 If you want the server usable in a terminal anyway, `--terminal-approval`
 exposes the commit tool to the agent and leans on your client's own approve/deny

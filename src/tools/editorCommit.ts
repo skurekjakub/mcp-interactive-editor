@@ -6,10 +6,7 @@ import type { ToolContext } from "./context.js";
 import { commit } from "./commit.js";
 import { describeReceipt } from "./results.js";
 
-export function registerEditorCommit(
-  server: McpServer,
-  { guard, commitVisibility }: ToolContext,
-): void {
+export function registerEditorCommit(server: McpServer, context: ToolContext): void {
   registerAppTool(
     server,
     "editor_commit",
@@ -17,12 +14,13 @@ export function registerEditorCommit(
       title: "Commit the reviewed write",
       description:
         "The editor. Writes the human-approved content to disk. Called only by the panel, only " +
-        "on an explicit click. Not for agent use — the host blocks agent calls to this tool.",
+        "on an explicit click. Not for agent use — and in a host that cannot render the panel it " +
+        "refuses outright, because then nobody has seen the diff.",
       inputSchema: { proposalId: z.string() },
-      _meta: { ui: { visibility: commitVisibility } },
+      _meta: { ui: { visibility: context.commitVisibility } },
     },
     async ({ proposalId }) => {
-      const receipt = await commit(guard, proposalId);
+      const receipt = await commit(context, proposalId);
       return {
         content: [{ type: "text", text: describeReceipt(receipt) }],
         structuredContent: receipt as unknown as Record<string, unknown>,

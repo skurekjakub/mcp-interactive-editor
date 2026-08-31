@@ -120,7 +120,7 @@ async function main(): Promise<void> {
     },
   );
 
-  registerTools(server, guard, { commitVisibility });
+  registerTools(server, guard, { commitVisibility, terminalApproval: cli.terminalApproval });
 
   // stdout is the transport; anything logged there corrupts the protocol.
   process.stderr.write(

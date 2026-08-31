@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { RESOURCE_MIME_TYPE, getUiCapability } from "@modelcontextprotocol/ext-apps/server";
 import type { FsGuard } from "../fsGuard.js";
 import type { ToolContext } from "./context.js";
 import { registerEditorView } from "./view.js";
@@ -38,6 +39,11 @@ export interface ToolOptions {
    * trades the editable review for the client's own approve/deny prompt.
    */
   commitVisibility: Array<"model" | "app">;
+  /**
+   * True when `--terminal-approval` was passed. Without it, a host that cannot
+   * render the panel is refused a commit outright rather than trusted.
+   */
+  terminalApproval?: boolean;
 }
 
 export function registerTools(
@@ -45,7 +51,12 @@ export function registerTools(
   guard: FsGuard,
   options: ToolOptions = { commitVisibility: ["app"] },
 ): void {
-  const context: ToolContext = { guard, commitVisibility: options.commitVisibility };
+  const context: ToolContext = {
+    guard,
+    commitVisibility: options.commitVisibility,
+    terminalApproval: options.terminalApproval ?? false,
+    canRenderPanel: () => hostRendersPanel(server),
+  };
 
   registerEditorView(server);
 
@@ -63,4 +74,19 @@ export function registerTools(
   // Read-only helpers, safe for both callers.
   registerReadFile(server, context);
   registerListRoots(server, context);
+}
+
+/**
+ * Does the connected host actually render MCP Apps?
+ *
+ * `visibility: ["app"]` is a request to the host, not a guarantee — a host that
+ * does not implement MCP Apps hands every tool to the agent, `editor_attach`
+ * included, and then the agent can mark its own proposal as reviewed. The
+ * client's declared capabilities are the one part of this the agent does not
+ * get to author, so that is what the commit path asks.
+ */
+function hostRendersPanel(server: McpServer): boolean {
+  const ui = getUiCapability(server.server.getClientCapabilities());
+  if (!ui) return false;
+  return ui.mimeTypes === undefined || ui.mimeTypes.includes(RESOURCE_MIME_TYPE);
 }

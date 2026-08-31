@@ -28748,11 +28748,6 @@ function toPosix(p2) {
   return p2.split(sep).join("/");
 }
 
-// src/tools/view.ts
-import { readFile as readFile2 } from "node:fs/promises";
-import { dirname as dirname2, resolve as resolve2 } from "node:path";
-import { fileURLToPath } from "node:url";
-
 // node_modules/@modelcontextprotocol/ext-apps/dist/src/server/index.js
 init_v4();
 var r = ((Z) => typeof __require < "u" ? __require : typeof Proxy < "u" ? new Proxy(Z, { get: ($, J) => (typeof __require < "u" ? __require : $)[J] }) : Z)(function(Z) {
@@ -28847,6 +28842,16 @@ function K3(Z, $, J, X) {
 function N3(Z, $, J, X, V) {
   return Z.registerResource($, J, { mimeType: p, ...X }, V);
 }
+var TQ = "io.modelcontextprotocol/ui";
+function Y3(Z) {
+  if (!Z) return;
+  return Z.extensions?.[TQ];
+}
+
+// src/tools/view.ts
+import { readFile as readFile2 } from "node:fs/promises";
+import { dirname as dirname2, resolve as resolve2 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // src/tools/context.ts
 var VIEW_URI = "ui://interactive-editor/panel.html";
@@ -29484,9 +29489,15 @@ function registerEditorUpdate(server, { guard }) {
 }
 
 // src/tools/commit.ts
-async function commit(guard, proposalId) {
+async function commit(context, proposalId) {
+  const { guard } = context;
   const before = getProposal(proposalId);
   if (before.committedAt) throw new Error("This proposal has already been resolved.");
+  if (!context.terminalApproval && !context.canRenderPanel()) {
+    throw new Error(
+      "This host does not render MCP Apps, so the editor never appeared and nobody has seen this diff. Refusing to write. Start the server with --terminal-approval to fall back to your client's own approve/deny prompt instead."
+    );
+  }
   if (!before.attached) {
     throw new Error("This proposal was never opened in the editor. Refusing to write.");
   }
@@ -29523,18 +29534,18 @@ ${blockers.map((b) => `  - ${b}`).join("\n")}`);
 }
 
 // src/tools/editorCommit.ts
-function registerEditorCommit(server, { guard, commitVisibility }) {
+function registerEditorCommit(server, context) {
   K3(
     server,
     "editor_commit",
     {
       title: "Commit the reviewed write",
-      description: "The editor. Writes the human-approved content to disk. Called only by the panel, only on an explicit click. Not for agent use \u2014 the host blocks agent calls to this tool.",
+      description: "The editor. Writes the human-approved content to disk. Called only by the panel, only on an explicit click. Not for agent use \u2014 and in a host that cannot render the panel it refuses outright, because then nobody has seen the diff.",
       inputSchema: { proposalId: external_exports.string() },
-      _meta: { ui: { visibility: commitVisibility } }
+      _meta: { ui: { visibility: context.commitVisibility } }
     },
     async ({ proposalId }) => {
-      const receipt = await commit(guard, proposalId);
+      const receipt = await commit(context, proposalId);
       return {
         content: [{ type: "text", text: describeReceipt(receipt) }],
         structuredContent: receipt
@@ -29596,33 +29607,50 @@ function registerReadFile(server, { guard }) {
 }
 
 // src/tools/listRoots.ts
-function registerListRoots(server, { guard }) {
+function registerListRoots(server, context) {
+  const { guard } = context;
   K3(
     server,
     "list_roots",
     {
       title: "List writable roots",
-      description: "The directories this editor will write inside. Everything else is refused.",
+      description: "The directories this editor will write inside, and whether the connected host can actually render the review panel. Call this first when the editor does not appear.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["model", "app"] } }
     },
-    async () => ({
-      content: [
-        {
-          type: "text",
-          text: `Writable roots:
-${guard.roots.map((r2) => `  ${r2}`).join("\n")}` + (guard.dryRun ? "\n\nDRY RUN: commits are simulated, nothing reaches disk." : "")
+    async () => {
+      const rendersPanel = context.canRenderPanel();
+      const verdict = rendersPanel ? "This host renders the panel: proposals open an editor and can be committed there." : context.terminalApproval ? "This host does NOT render the panel. --terminal-approval is on, so commits fall back to your client's own approve/deny prompt." : "This host does NOT render the panel, so no proposal can be committed. Nothing is broken \u2014 that is the designed refusal. Use a host with MCP Apps support, or start the server with --terminal-approval to use your client's prompt as the gate.";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Writable roots:
+${guard.roots.map((r2) => `  ${r2}`).join("\n")}
+
+${verdict}` + (guard.dryRun ? "\n\nDRY RUN: commits are simulated, nothing reaches disk." : "")
+          }
+        ],
+        structuredContent: {
+          roots: guard.roots,
+          dryRun: guard.dryRun,
+          rendersPanel,
+          terminalApproval: context.terminalApproval
         }
-      ],
-      structuredContent: { roots: guard.roots, dryRun: guard.dryRun }
-    })
+      };
+    }
   );
 }
 
 // src/tools/index.ts
 function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
-  const context = { guard, commitVisibility: options.commitVisibility };
+  const context = {
+    guard,
+    commitVisibility: options.commitVisibility,
+    terminalApproval: options.terminalApproval ?? false,
+    canRenderPanel: () => hostRendersPanel(server)
+  };
   registerEditorView(server);
   registerProposeWrite(server, context);
   registerOpenFile(server, context);
@@ -29633,6 +29661,11 @@ function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
   registerEditorDiscard(server, context);
   registerReadFile(server, context);
   registerListRoots(server, context);
+}
+function hostRendersPanel(server) {
+  const ui = Y3(server.server.getClientCapabilities());
+  if (!ui) return false;
+  return ui.mimeTypes === void 0 || ui.mimeTypes.includes(p);
 }
 
 // src/server.ts
@@ -29727,7 +29760,7 @@ ${HELP}`);
       instructions: "propose_write opens an editable review panel: the human gets a live diff against disk, edits your draft in place, and saves. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves. Passages they select in either pane come back to you as quotes with line numbers."
     }
   );
-  registerTools(server, guard, { commitVisibility });
+  registerTools(server, guard, { commitVisibility, terminalApproval: cli.terminalApproval });
   process.stderr.write(
     `interactive-editor ready. Roots:
 ${guard.roots.map((r2) => `  ${r2}`).join("\n")}

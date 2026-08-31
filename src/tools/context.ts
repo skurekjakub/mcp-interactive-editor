@@ -15,6 +15,15 @@ export interface ToolContext {
    * trades the editable review for the client's own approve/deny prompt.
    */
   commitVisibility: Array<"model" | "app">;
+  /**
+   * Whether the connected host actually renders MCP Apps.
+   *
+   * A thunk, not a value: capabilities are only known after `initialize`, which
+   * happens after the tools are registered.
+   */
+  canRenderPanel: () => boolean;
+  /** True when `--terminal-approval` was passed and the client's prompt is the gate. */
+  terminalApproval: boolean;
 }
 
 /** The View every editor-opening tool points at. */
