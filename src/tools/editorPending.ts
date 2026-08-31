@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
-import { buildEditorState, findOpenProposal } from "../proposals.js";
+import { buildEditorState, findOpenProposal, openProposals } from "../proposals.js";
 import type { ToolContext } from "./context.js";
 import { panelResult } from "./results.js";
 
@@ -31,9 +31,31 @@ export function registerEditorPending(server: McpServer, { guard }: ToolContext)
        */
       const proposal = findOpenProposal(path);
       if (!proposal) {
+        /*
+         * Say what is actually here. "No proposal is open" is true of both the
+         * ordinary case — the panel asked before the server finished creating
+         * it — and the bad one, where several are open and none matched the path
+         * the host handed back. Those want opposite responses, and a panel that
+         * cannot tell them apart retries for thirty seconds and then reports
+         * that asking kept coming back empty.
+         */
+        const open = openProposals();
         return {
-          content: [{ type: "text", text: "No proposal is open." }],
-          structuredContent: { open: false },
+          content: [
+            {
+              type: "text",
+              text:
+                open.length === 0
+                  ? "No proposal is open yet."
+                  : `No open proposal matches ${path ?? "(no path given)"}. ` +
+                    `Open: ${open.map((p) => p.target.requested).join(", ")}`,
+            },
+          ],
+          structuredContent: {
+            open: false,
+            openCount: open.length,
+            openPaths: open.map((p) => p.target.requested),
+          },
         } satisfies CallToolResult;
       }
 

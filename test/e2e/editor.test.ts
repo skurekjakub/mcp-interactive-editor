@@ -631,6 +631,30 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
     });
   });
 
+  describe("claiming a proposal from the panel", () => {
+    it("says what it has open when nothing matches, rather than a bare no", async () => {
+      // "No proposal is open" is true both when the panel asked too early and
+      // when several are open and none matched the path the host handed back.
+      // Those want opposite responses, so the answer has to tell them apart.
+      await call("propose_write", { path: join(root, "claimable.txt"), content: "one\n" });
+
+      const answer = await call("editor_pending", { path: join(root, "not-a-real-file.txt") });
+      const payload = answer.structuredContent as { open: boolean; openPaths?: string[] };
+
+      expect(payload.open).toBe(false);
+      expect(payload.openPaths?.length, "it must report what it does have").toBeGreaterThan(0);
+      expect(text(answer)).toMatch(/no open proposal matches/i);
+    });
+
+    it("hands over the proposal when the path does match", async () => {
+      const target = join(root, "claim-by-path.txt");
+      await call("propose_write", { path: target, content: "two\n" });
+
+      const claimed = await call("editor_pending", { path: target });
+      expect(state(claimed).proposal.target.requested).toBe(target);
+    });
+  });
+
   describe("dry run", () => {
     it("runs the whole flow without touching disk", async () => {
       const dryRoot = await mkdtemp(join(tmpdir(), "interactive-editor-dry-"));

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp, useHostStyleVariables } from "@modelcontextprotocol/ext-apps/react";
 import type { EditorState, ProposalHandle } from "../../../shared/types.js";
 import { IS_PREVIEW, hostBridge, previewBridge, previewState, type Bridge } from "../bridge.js";
-import { messageOf } from "../lib/results.js";
+import { messageOf, refusalIn, textOf } from "../lib/results.js";
 import { PANEL_VERSION } from "../lib/version.js";
 
 const PUSH_DEBOUNCE_MS = 500;
@@ -157,17 +157,29 @@ export function useProposalSession(paused: boolean): ProposalSession {
 
     void (async () => {
       const deadline = Date.now() + CLAIM_TIMEOUT_MS;
+      let lastAnswer = "";
       while (!cancelled && Date.now() < deadline) {
         try {
           const result = await bridge.callTool(
             "editor_pending",
             openedPath ? { path: openedPath } : {},
           );
+          // A refused call is not an empty one. Retrying it thirty seconds and
+          // then blaming an empty answer hides whatever the host actually said.
+          const refused = refusalIn(result);
+          if (refused) {
+            if (!cancelled) setFailure(refused);
+            return;
+          }
+
           const next = result.structuredContent as unknown as EditorState | undefined;
           if (next?.proposal) {
             if (!cancelled) adopt(next);
             return;
           }
+          // Keep the server's own account of what it has open, so the timeout
+          // below can say something better than "empty".
+          lastAnswer = textOf(result);
         } catch (cause) {
           if (!cancelled) setFailure(messageOf(cause));
           return;
@@ -176,7 +188,9 @@ export function useProposalSession(paused: boolean): ProposalSession {
       }
       if (!cancelled) {
         setFailure(
-          "No proposal was open for this panel, and asking for one kept coming back empty.",
+          `Gave up waiting for a proposal to claim. The server last said: ${
+            lastAnswer || "nothing at all"
+          }`,
         );
       }
     })();
@@ -196,10 +210,18 @@ export function useProposalSession(paused: boolean): ProposalSession {
     void bridge
       .callTool("editor_attach", { proposalId })
       .then((result) => {
-        const next = result.structuredContent as unknown as EditorState | undefined;
         if (cancelled) return;
+
+        const refused = refusalIn(result);
+        if (refused) {
+          setFailure(refused);
+          return;
+        }
+
+        const next = result.structuredContent as unknown as EditorState | undefined;
         adopt(next);
         if (next?.proposal) setPhase("ready");
+        else setFailure("The server attached to the proposal but sent nothing back to show.");
       })
       .catch((cause: unknown) => {
         if (!cancelled) setFailure(messageOf(cause));

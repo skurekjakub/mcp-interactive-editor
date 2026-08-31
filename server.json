@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.skurekjakub/mcp-interactive-editor",
   "description": "An interactive editor in front of every file write. The model proposes; the human edits the proposal by hand and decides whether it lands.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "repository": {
     "url": "https://github.com/skurekjakub/mcp-interactive-editor",
     "source": "github"
@@ -11,9 +11,9 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/skurekjakub/mcp-interactive-editor/releases/download/v0.5.1/mcp-interactive-editor.mcpb",
-      "version": "0.5.1",
-      "fileSha256": "eaaa1e85a60a632bb64671cda0a16376df1b7b28de02ba1028551d2875063a9f",
+      "identifier": "https://github.com/skurekjakub/mcp-interactive-editor/releases/download/v0.5.2/mcp-interactive-editor.mcpb",
+      "version": "0.5.2",
+      "fileSha256": "a7aa81f9a2b9c62a194a796ec98b6cf2e72e6861c3e2ba090a2f583bc3188d78",
       "transport": {
         "type": "stdio"
       }

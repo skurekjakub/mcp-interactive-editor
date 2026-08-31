@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-31
+
+### Fixed
+
+- **The panel treated a refused call as an empty one.** A tool that refuses
+  answers with `isError: true` and the reason in its text blocks, not a thrown
+  rejection — so a `catch` sees nothing. Both the claim loop and the attach path
+  read only `structuredContent`, found none, and carried on: thirty seconds of
+  retries ending in "asking for one kept coming back empty", while the host had
+  been answering with the actual reason ten times a second. Both now surface it
+  the moment it arrives.
+
+  This is the same mistake as the loading screen that swallowed its own error,
+  one layer further down: the display was fixed and the swallow was left.
+
+- **`editor_pending` said "no proposal is open" for two different situations.**
+  It means one thing when the panel asked before the server had finished
+  creating the proposal, and something else entirely when several are open and
+  none matched the path the host handed back — and they want opposite responses.
+  It now reports how many are open and which paths it has, and the panel repeats
+  the server's own words instead of its own guess when it gives up.
+
 ## [0.5.1] - 2026-08-31
 
 Five things that were owed.
@@ -335,7 +357,8 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.1...v0.4.2

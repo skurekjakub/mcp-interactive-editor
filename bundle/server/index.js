@@ -29262,7 +29262,7 @@ function hasBlockers(findings) {
 }
 
 // src/version.ts
-var SERVER_VERSION = "0.5.1";
+var SERVER_VERSION = "0.5.2";
 
 // src/proposals.ts
 var proposals = /* @__PURE__ */ new Map();
@@ -29339,6 +29339,9 @@ function samePath(a, b) {
   } catch {
     return false;
   }
+}
+function openProposals() {
+  return [...proposals.values()].filter((p2) => !p2.committedAt);
 }
 
 // src/tools/results.ts
@@ -29769,9 +29772,19 @@ function registerEditorPending(server, { guard }) {
     async ({ path }) => {
       const proposal = findOpenProposal(path);
       if (!proposal) {
+        const open = openProposals();
         return {
-          content: [{ type: "text", text: "No proposal is open." }],
-          structuredContent: { open: false }
+          content: [
+            {
+              type: "text",
+              text: open.length === 0 ? "No proposal is open yet." : `No open proposal matches ${path ?? "(no path given)"}. Open: ${open.map((p2) => p2.target.requested).join(", ")}`
+            }
+          ],
+          structuredContent: {
+            open: false,
+            openCount: open.length,
+            openPaths: open.map((p2) => p2.target.requested)
+          }
         };
       }
       return panelResult(buildEditorState(guard, proposal), "Claimed the open proposal.");

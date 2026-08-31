@@ -6,4 +6,4 @@
  * panel compares itself against: two installs of this thing can drift, and a
  * panel behaving like an older build with no way to tell is a whole afternoon.
  */
-export const SERVER_VERSION = "0.5.1";
+export const SERVER_VERSION = "0.5.2";

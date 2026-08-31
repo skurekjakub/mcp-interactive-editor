@@ -140,3 +140,8 @@ function samePath(a: string, b: string): boolean {
     return false;
   }
 }
+
+/** Every proposal still awaiting a decision, oldest first. */
+export function openProposals(): Proposal[] {
+  return [...proposals.values()].filter((p) => !p.committedAt);
+}
