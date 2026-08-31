@@ -36,7 +36,7 @@ export function registerEditorPending(server: McpServer, { guard }: ToolContext)
        * result carrying a proposal id exists. It is handed the arguments
        * instead, and trades them for the proposal here.
        */
-      const proposal = findOpenProposal(path);
+      const proposal = await findOpenProposal(path);
       if (!proposal) {
         /*
          * Say what is actually here. "No proposal is open" is true of both the
@@ -46,7 +46,7 @@ export function registerEditorPending(server: McpServer, { guard }: ToolContext)
          * cannot tell them apart retries for thirty seconds and then reports
          * that asking kept coming back empty.
          */
-        const open = openProposals();
+        const open = await openProposals();
         return {
           content: [
             {

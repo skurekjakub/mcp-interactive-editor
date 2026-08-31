@@ -28,8 +28,8 @@ export function registerEditorAttach(server: McpServer, { guard }: ToolContext):
     async ({ proposalId }) => {
       // Re-read on attach: the file may have moved on between the model proposing
       // and the human actually looking at the editor.
-      const { target, baseline } = await restatTarget(guard, getProposal(proposalId));
-      const proposal = updateProposal(proposalId, { target, baseline, attached: true });
+      const { target, baseline } = await restatTarget(guard, await getProposal(proposalId));
+      const proposal = await updateProposal(proposalId, { target, baseline, attached: true });
 
       // The panel collects here the state the opening tool did not return, so
       // this is the one place the whole file legitimately travels.

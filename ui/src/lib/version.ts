@@ -6,4 +6,4 @@
  * halves genuinely can end up different builds — and the symptom of that is
  * behaviour that matches neither release.
  */
-export const PANEL_VERSION = "0.6.2";
+export const PANEL_VERSION = "0.7.0";

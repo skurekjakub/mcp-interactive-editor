@@ -35,7 +35,7 @@ export function registerEditorUpdate(server: McpServer, { guard }: ToolContext):
       _meta: { ui: { visibility: ["app"] } },
     },
     async ({ proposalId, content, destructiveAcknowledged }) => {
-      const next = updateProposal(proposalId, {
+      const next = await updateProposal(proposalId, {
         ...(content !== undefined ? { content } : {}),
         ...(destructiveAcknowledged !== undefined ? { destructiveAcknowledged } : {}),
       });
