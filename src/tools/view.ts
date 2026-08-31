@@ -6,6 +6,18 @@ import { RESOURCE_MIME_TYPE, registerAppResource } from "@modelcontextprotocol/e
 import { VIEW_URI } from "./context.js";
 
 /**
+ * How the host should frame and confine the panel.
+ *
+ * The bundle is inlined, so the View needs nothing from the network. Every list
+ * stays empty on purpose: an editor that can phone home is a worse thing than
+ * the writes it is guarding.
+ */
+const UI_META = {
+  csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
+  prefersBorder: true,
+} as const;
+
+/**
  * Registers the panel as one self-contained HTML resource.
  *
  * @param server - The MCP server to register against.
@@ -15,20 +27,24 @@ export function registerEditorView(server: McpServer): void {
     server,
     "Interactive Editor",
     VIEW_URI,
-    {
-      mimeType: RESOURCE_MIME_TYPE,
-      _meta: {
-        ui: {
-          // The bundle is inlined, so the View needs nothing from the network.
-          // Every list stays empty on purpose: an editor that can phone home is
-          // a worse thing than the writes it is guarding.
-          csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
-          prefersBorder: true,
-        },
-      },
-    },
+    { mimeType: RESOURCE_MIME_TYPE, _meta: { ui: UI_META } },
     async (uri) => ({
-      contents: [{ uri: uri.href, mimeType: RESOURCE_MIME_TYPE, text: await loadViewHtml() }],
+      /*
+       * The same metadata on the content item, not only on the listing entry.
+       * MCP Apps § Resource Metadata builds the sandbox CSP from what
+       * `resources/read` returns; the listing entry is documented as a
+       * fallback, and a server is free to omit UI resources from
+       * `resources/list` entirely — in which case the listing is never read and
+       * `prefersBorder` is lost with it.
+       */
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: RESOURCE_MIME_TYPE,
+          text: await loadViewHtml(),
+          _meta: { ui: UI_META },
+        },
+      ],
     }),
   );
 }

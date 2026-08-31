@@ -172,6 +172,25 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
         /<script[^>]+src=["']http/i,
       );
     });
+
+    /*
+     * The spec builds the sandbox CSP from what `resources/read` returns, and
+     * documents the listing entry as a fallback a server may not even publish.
+     * Metadata that exists only on the listing rides on that fallback.
+     */
+    it("carries the sandbox metadata on the content item, not only the listing", async () => {
+      // Act.
+      const read = await client.readResource({ uri: "ui://interactive-editor/panel.html" });
+      const [content] = read.contents as Array<{
+        _meta?: { ui?: { csp?: Record<string, string[]>; prefersBorder?: boolean } };
+      }>;
+
+      // Assert.
+      const ui = content._meta?.ui;
+      expect(ui, "the read item must carry _meta.ui").toBeTruthy();
+      expect(ui?.prefersBorder).toBe(true);
+      expect(ui?.csp).toEqual({ connectDomains: [], resourceDomains: [], frameDomains: [] });
+    });
   });
 
   describe("proposing", () => {

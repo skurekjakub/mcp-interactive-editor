@@ -29090,25 +29090,33 @@ import { fileURLToPath } from "node:url";
 var VIEW_URI = "ui://interactive-editor/panel.html";
 
 // src/tools/view.ts
+var UI_META = {
+  csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
+  prefersBorder: true
+};
 function registerEditorView(server) {
   N3(
     server,
     "Interactive Editor",
     VIEW_URI,
-    {
-      mimeType: p,
-      _meta: {
-        ui: {
-          // The bundle is inlined, so the View needs nothing from the network.
-          // Every list stays empty on purpose: an editor that can phone home is
-          // a worse thing than the writes it is guarding.
-          csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
-          prefersBorder: true
-        }
-      }
-    },
+    { mimeType: p, _meta: { ui: UI_META } },
     async (uri) => ({
-      contents: [{ uri: uri.href, mimeType: p, text: await loadViewHtml() }]
+      /*
+       * The same metadata on the content item, not only on the listing entry.
+       * MCP Apps § Resource Metadata builds the sandbox CSP from what
+       * `resources/read` returns; the listing entry is documented as a
+       * fallback, and a server is free to omit UI resources from
+       * `resources/list` entirely — in which case the listing is never read and
+       * `prefersBorder` is lost with it.
+       */
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: p,
+          text: await loadViewHtml(),
+          _meta: { ui: UI_META }
+        }
+      ]
     })
   );
 }
