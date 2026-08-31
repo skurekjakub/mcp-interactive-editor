@@ -254,18 +254,15 @@ and `switch-exhaustiveness-check`, which catches a phase nobody handled.
 than usual — every exported symbol is one the comment policy has to document for
 a caller that does not exist.
 
-**The toolchain is pinned, and npm is pinned for a sharper reason than Node.**
-`.nvmrc`, `engines` and `engine-strict=true` in `.npmrc` enforce both. jsdom,
-undici and whatwg-url all need a recent Node, and an older one runs the panel
+**Node 22 or newer.** `.nvmrc` and `engine-strict=true` in `.npmrc` enforce it;
+jsdom, undici and whatwg-url all require it, and an older Node runs the panel
 suite on an unsupported runtime that works right up until it does not.
 
-npm is pinned because npm 10 and npm 11 resolve this tree's peer dependencies
-differently and write lockfiles the other refuses. The inspector brings its own
-nested Vite, which declares `esbuild` as a peer that the root copy does not
-satisfy; npm 10 installs that peer and npm 11 does not. Neither lockfile is
-wrong, and no single one satisfies both — a lockfile written on the wrong npm
-fails `npm ci` on every CI platform while passing locally. Match the pin rather
-than regenerating the lockfile to make an error go away.
+A dependency far enough behind its own ecosystem can split the lockfile between
+npm majors, which reads as a CI-only failure: `npm ci` reports packages missing
+from a lockfile that installs cleanly on the machine that wrote it. That is a
+stale dependency asking to be upgraded rather than a toolchain to pin around —
+the peer it cannot satisfy is the thing to fix.
 
 ## Which host gets you what
 
