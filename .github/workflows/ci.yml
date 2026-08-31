@@ -32,17 +32,49 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint
+        # Type-aware linting reads the same tsconfigs on every platform and
+        # cannot disagree between them, so once is enough.
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run lint
+
+      - name: Dead code and unused dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run lint:dead
+
+      - name: Audit what ships
+        # Only the runtime dependencies. Dev-only advisories with no fix
+        # available would red-line every run over a packing tool no user
+        # installs.
+        if: matrix.os == 'ubuntu-latest'
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Format
         run: npm run format:check
 
+      - name: Comment policy
+        run: npm run lint:comments
+
       - name: Test
         run: npm test
+
+      - name: Fail if the symlink-escape test was skipped
+        # That test is the flagship containment guarantee. It self-skips where
+        # the platform will not create a symlink, which is legitimate on
+        # Windows and never on Linux — so a skip there is a silent hole.
+        if: matrix.os == 'ubuntu-latest'
+        run: npx vitest run test/unit/fsGuard.test.ts --reporter=json --outputFile=fsguard.json &&
+          node -e "const r=require('./fsguard.json');if(r.numPendingTests>0){console.error('::error::a
+          containment test was skipped on Linux');process.exit(1)}"
 
   bundle:
     needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version guard below compares against the base branch.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -58,7 +90,42 @@ jobs:
         # bundle that disagrees with src/ means they install yesterday's server.
         run: git diff --exit-code -- bundle/ || (echo "::error::bundle/ is out of date — run 'npm run bundle' and commit it" && exit 1)
 
+      - name: Fail if the code changed without a version bump
+        # Claude Code caches an installed plugin under its declared version and
+        # rebuilds only when that number changes, so shipping a change without a
+        # bump leaves every existing install on the tree it first installed. The
+        # symptom is indistinguishable from a restart that did not take.
+        if: github.event_name == 'pull_request'
+        run: |
+          base="origin/${{ github.base_ref }}"
+          changed=$(git diff --name-only "$base"...HEAD -- src shared ui | wc -l)
+          if [ "$changed" -eq 0 ]; then
+            echo "No source changes; no bump required."
+            exit 0
+          fi
+          before=$(git show "$base:package.json" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')
+          after=$(node -pe 'require("./package.json").version')
+          if [ "$before" = "$after" ]; then
+            echo "::error::src/, shared/ or ui/ changed but the version is still $after — run 'npm run bump -- <next>'"
+            exit 1
+          fi
+          echo "Version moved $before -> $after."
+
+      - name: Pack the extension
+        # `mcpb pack` validates the manifest against its schema, which nothing
+        # else in the pipeline does. A manifest regression would otherwise
+        # surface for the first time at release.
+        run: npm run pack
+
       - uses: actions/upload-artifact@v4
         with:
           name: bundle
           path: bundle/
+
+      - name: Report the extension checksum
+        # server.json pins fileSha256 for the published artifact, and registry
+        # clients verify it before installing.
+        run: |
+          sha=$(sha256sum dist/mcp-interactive-editor.mcpb | cut -d' ' -f1)
+          echo "### Extension checksum" >> "$GITHUB_STEP_SUMMARY"
+          echo '`'"$sha"'`' >> "$GITHUB_STEP_SUMMARY"

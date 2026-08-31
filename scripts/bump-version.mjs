@@ -22,11 +22,17 @@
  */
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  MANIFESTS,
+  ROOT,
+  VERSION_LITERAL,
+  VERSION_MODULES,
+  read,
+  versionDrift,
+} from "./versions.mjs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const next = process.argv[2];
 
 if (!/^\d+\.\d+\.\d+$/.test(next ?? "")) {
@@ -34,11 +40,26 @@ if (!/^\d+\.\d+\.\d+$/.test(next ?? "")) {
   process.exit(2);
 }
 
-const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 const current = JSON.parse(read("package.json")).version;
 
+/*
+ * Check every declaration before deciding there is nothing to do. Guarding on
+ * `package.json` alone means a tree where only that file moved — a hand edit,
+ * `npm version`, a merge resolution, a half-finished bump — reports success and
+ * leaves the plugin cache key stale for good.
+ */
+const drift = versionDrift();
+if (drift.length > 0) {
+  process.stderr.write(
+    `The declared versions disagree. Fix these before bumping:\n${drift
+      .map((d) => `  ${d}`)
+      .join("\n")}\n`,
+  );
+  process.exit(1);
+}
+
 if (current === next) {
-  process.stderr.write(`package.json is already at ${next}. Nothing to do.\n`);
+  process.stderr.write(`Every declaration is already at ${next}. Nothing to do.\n`);
   process.exit(0);
 }
 
@@ -46,8 +67,7 @@ if (current === next) {
 const planned = [];
 const problems = [];
 
-/** The manifests. `.claude-plugin/plugin.json` is the one that is the cache key. */
-for (const rel of ["package.json", "package-lock.json", ".claude-plugin/plugin.json"]) {
+for (const rel of MANIFESTS) {
   const doc = JSON.parse(read(rel));
   if (doc.version !== current) {
     problems.push(`${rel}: expected ${current}, found ${doc.version}`);
@@ -73,15 +93,13 @@ planned.push({
   content: `${JSON.stringify(marketplace, null, 2)}\n`,
 });
 
-/** The two halves' own version modules. */
-for (const rel of ["src/version.ts", "ui/src/lib/version.ts"]) {
+for (const rel of VERSION_MODULES) {
   const before = read(rel);
-  const pattern = /(_VERSION = ")\d+\.\d+\.\d+(")/;
-  if (!pattern.test(before)) {
+  if (!VERSION_LITERAL.test(before)) {
     problems.push(`${rel}: could not find the version literal`);
     continue;
   }
-  planned.push({ rel, content: before.replace(pattern, `$1${next}$2`) });
+  planned.push({ rel, content: before.replace(VERSION_LITERAL, `$1${next}$3`) });
 }
 
 if (problems.length > 0) {

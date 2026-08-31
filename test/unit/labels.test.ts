@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Proposal, WriteMode } from "../../shared/types.js";
-import { basename, commitLabel } from "../../ui/src/lib/labels.js";
+import { commitLabel } from "../../ui/src/lib/labels.js";
 
 const proposal = (mode: WriteMode, display: string): Proposal => ({
   proposalId: "p",
+  createdAt: 0,
   mode,
   target: {
     requested: display,
@@ -50,15 +51,5 @@ describe("commitLabel", () => {
   it("uses the file name, not the whole path", () => {
     const label = commitLabel(proposal("overwrite", "deep/nested/file.ts"), "x", false);
     expect(label).toBe("Write 1 line to file.ts");
-  });
-});
-
-describe("basename", () => {
-  it("takes the last segment", () => {
-    expect(basename("a/b/c.txt")).toBe("c.txt");
-  });
-
-  it("leaves a bare name alone", () => {
-    expect(basename("c.txt")).toBe("c.txt");
   });
 });

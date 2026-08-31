@@ -4,8 +4,14 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, findOpenProposal, openProposals } from "../proposals.js";
 import type { ToolContext } from "./context.js";
-import { panelResult } from "./results.js";
+import { panelResult } from "./wording.js";
 
+/**
+ * Registers the tool a panel uses to claim the proposal it was opened for.
+ *
+ * @param server - The MCP server to register against.
+ * @param context - Guard, for building the state to hand back.
+ */
 export function registerEditorPending(server: McpServer, { guard }: ToolContext): void {
   registerAppTool(
     server,
@@ -20,6 +26,7 @@ export function registerEditorPending(server: McpServer, { guard }: ToolContext)
           .optional()
           .describe("Narrow to one file, from the arguments the panel was handed."),
       },
+      annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } },
     },
     async ({ path }) => {

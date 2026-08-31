@@ -14600,7 +14600,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve5.call(this, root, ref);
+      let _sch = resolve4.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -14627,7 +14627,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve5(root, ref) {
+    function resolve4(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -15452,7 +15452,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve5(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -15814,7 +15814,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve5,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
@@ -18802,10 +18802,6 @@ var require_dist = __commonJS({
     exports.default = formatsPlugin;
   }
 });
-
-// src/server.ts
-import { homedir } from "node:os";
-import { resolve as resolve4 } from "node:path";
 
 // node_modules/zod/v3/external.js
 var external_exports = {};
@@ -26429,7 +26425,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
+        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error40) {
@@ -26446,7 +26442,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve4, reject) => {
       const earlyReject = (error40) => {
         reject(error40);
       };
@@ -26524,7 +26520,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve5(parseResult.data);
+            resolve4(parseResult.data);
           }
         } catch (error40) {
           reject(error40);
@@ -26785,12 +26781,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve4, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve5, interval);
+      const timeoutId = setTimeout(resolve4, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -27881,7 +27877,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
+      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -28545,22 +28541,167 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve5) => {
+    return new Promise((resolve4) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve5();
+        resolve4();
       } else {
-        this._stdout.once("drain", resolve5);
+        this._stdout.once("drain", resolve4);
       }
     });
   }
 };
 
+// src/cli.ts
+import { homedir } from "node:os";
+import { resolve as resolve2 } from "node:path";
+
 // src/fsGuard.ts
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  access,
+  chmod,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile
+} from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+// shared/diff.ts
+var LCS_CELL_BUDGET = 1500 * 1500;
+var CONTEXT_LINES = 3;
+function splitLines(text) {
+  if (text === "") return [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+function countLines(text) {
+  return splitLines(text).length;
+}
+function endsWithNewline(text) {
+  return text.endsWith("\n");
+}
+function diffLines(before, after) {
+  const a = splitLines(before);
+  const b = splitLines(after);
+  let prefix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) {
+    suffix += 1;
+  }
+  const midA = a.slice(prefix, a.length - suffix);
+  const midB = b.slice(prefix, b.length - suffix);
+  const truncated = midA.length * midB.length > LCS_CELL_BUDGET;
+  const middle = truncated ? wholesaleReplace(midA, midB, prefix) : lcsDiff(midA, midB, prefix);
+  const lines = [
+    ...a.slice(0, prefix).map((text, i) => line("equal", i + 1, i + 1, text)),
+    ...middle,
+    ...a.slice(a.length - suffix).map((text, i) => line("equal", a.length - suffix + i + 1, b.length - suffix + i + 1, text))
+  ];
+  const newlineChanged = before !== "" && after !== "" && endsWithNewline(before) !== endsWithNewline(after);
+  const stats = {
+    added: lines.filter((l) => l.kind === "add").length,
+    removed: lines.filter((l) => l.kind === "remove").length,
+    ...truncated ? { truncated: true } : {},
+    ...newlineChanged ? { newlineAtEofChanged: true } : {}
+  };
+  return { hunks: toHunks(lines), stats };
+}
+function line(kind, oldLine, newLine, text) {
+  return { kind, oldLine, newLine, text };
+}
+function wholesaleReplace(a, b, offset) {
+  return [
+    ...a.map((text, i) => line("remove", offset + i + 1, null, text)),
+    ...b.map((text, i) => line("add", null, offset + i + 1, text))
+  ];
+}
+function lcsDiff(a, b, offset) {
+  const n = a.length;
+  const m2 = b.length;
+  const table = new Uint32Array((n + 1) * (m2 + 1));
+  const at = (i2, j3) => i2 * (m2 + 1) + j3;
+  for (let i2 = n - 1; i2 >= 0; i2 -= 1) {
+    for (let j3 = m2 - 1; j3 >= 0; j3 -= 1) {
+      table[at(i2, j3)] = a[i2] === b[j3] ? table[at(i2 + 1, j3 + 1)] + 1 : Math.max(table[at(i2 + 1, j3)], table[at(i2, j3 + 1)]);
+    }
+  }
+  const out = [];
+  let i = 0;
+  let j2 = 0;
+  while (i < n && j2 < m2) {
+    if (a[i] === b[j2]) {
+      out.push(line("equal", offset + i + 1, offset + j2 + 1, a[i]));
+      i += 1;
+      j2 += 1;
+    } else if (table[at(i + 1, j2)] >= table[at(i, j2 + 1)]) {
+      out.push(line("remove", offset + i + 1, null, a[i]));
+      i += 1;
+    } else {
+      out.push(line("add", null, offset + j2 + 1, b[j2]));
+      j2 += 1;
+    }
+  }
+  while (i < n) {
+    out.push(line("remove", offset + i + 1, null, a[i]));
+    i += 1;
+  }
+  while (j2 < m2) {
+    out.push(line("add", null, offset + j2 + 1, b[j2]));
+    j2 += 1;
+  }
+  return out;
+}
+function toHunks(lines) {
+  const changed = lines.map((l, i) => l.kind === "equal" ? -1 : i).filter((i) => i !== -1);
+  if (changed.length === 0) return [];
+  const ranges = [];
+  for (const index of changed) {
+    const start = Math.max(0, index - CONTEXT_LINES);
+    const end = Math.min(lines.length - 1, index + CONTEXT_LINES);
+    const last = ranges[ranges.length - 1];
+    if (last && start <= last[1] + 1) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      ranges.push([start, end]);
+    }
+  }
+  return ranges.map(([start, end]) => {
+    const slice = lines.slice(start, end + 1);
+    return {
+      oldStart: slice.find((l) => l.oldLine !== null)?.oldLine ?? 0,
+      newStart: slice.find((l) => l.newLine !== null)?.newLine ?? 0,
+      lines: slice
+    };
+  });
+}
+function formatUnifiedDiff(hunks, label, eof) {
+  if (hunks.length === 0) return `(no changes to ${label})`;
+  const out = [`--- ${label} (on disk)`, `+++ ${label} (proposed)`];
+  hunks.forEach((hunk, hunkIndex) => {
+    const oldCount = hunk.lines.filter((l) => l.kind !== "add").length;
+    const newCount = hunk.lines.filter((l) => l.kind !== "remove").length;
+    out.push(`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`);
+    hunk.lines.forEach((entry, lineIndex) => {
+      const marker = entry.kind === "add" ? "+" : entry.kind === "remove" ? "-" : " ";
+      out.push(marker + entry.text);
+      const lastOfAll = hunkIndex === hunks.length - 1 && lineIndex === hunk.lines.length - 1;
+      if (!lastOfAll || !eof) return;
+      const unterminated = entry.kind === "remove" ? !eof.before : !eof.after;
+      if (unterminated) out.push("\\ No newline at end of file");
+    });
+  });
+  return out.join("\n");
+}
+
+// src/fsGuard.ts
 var DEFAULT_DENY = [
   ".git/",
   "node_modules/",
@@ -28575,6 +28716,7 @@ var DEFAULT_DENY = [
   ".aws/",
   ".npmrc"
 ];
+var MAX_FILE_BYTES = 4 * 1024 * 1024;
 var PathRejected = class extends Error {
   constructor(message, reason) {
     super(message);
@@ -28598,78 +28740,85 @@ var FsGuard = class {
     this.dryRun = options.dryRun;
   }
   /**
-   * Roots have to be canonicalised the same way targets are, or containment
-   * compares two different spellings of the same directory and refuses
-   * everything. Two real cases: Windows hands out 8.3 short paths for temp
-   * directories (`RUNNER~1`) that `realpath` expands, and macOS resolves `/tmp`
-   * and `/var` into `/private`. Configure a root by either spelling and every
-   * write would be rejected as "outside the roots".
+   * Resolves the configured roots to their canonical spellings.
    *
-   * Resolved once, lazily, because the constructor cannot await. A root that
-   * does not exist keeps its configured form — it simply will not match
-   * anything until it does.
+   * Roots have to be canonicalised the same way targets are, or containment
+   * compares two different spellings of one directory and refuses everything.
+   * Windows hands out 8.3 short paths for temp directories that `realpath`
+   * expands, and macOS resolves `/tmp` and `/var` into `/private`.
+   *
+   * @returns The canonical root paths.
    */
   async resolveRoots() {
-    if (!this.canonicalRoots) {
-      this.canonicalRoots = await Promise.all(
-        this.roots.map(async (root) => {
-          try {
-            return await realpath(root);
-          } catch {
-            return root;
-          }
-        })
-      );
-    }
-    return this.canonicalRoots;
+    if (this.canonicalRoots) return this.canonicalRoots;
+    let complete = true;
+    const resolved = await Promise.all(
+      this.roots.map(async (root) => {
+        try {
+          return await realpath(root);
+        } catch {
+          complete = false;
+          return root;
+        }
+      })
+    );
+    if (complete) this.canonicalRoots = resolved;
+    return resolved;
   }
   /**
-   * Resolve a requested path against the roots.
+   * Resolves a requested path against the roots.
    *
    * Symlinks are resolved on the deepest existing ancestor, so a link planted
-   * inside a root that points outside it cannot be used to escape. A path that
-   * fails any check comes back with `absolute: null` rather than throwing,
-   * because the View needs to render the rejection, not crash on it.
+   * inside a root pointing outside it cannot be used to escape.
+   *
+   * Every failure returns `absolute: null` with a `rejection` naming the check
+   * that refused it, rather than throwing. The View renders the refusal, and a
+   * caller that cannot tell "outside the roots" from "matched the deny list"
+   * reports a file inside the project as being outside it.
+   *
+   * @param requested - Path as the model supplied it, absolute or root-relative.
+   * @returns The resolved target, or a rejection naming the failed check.
    */
   async describe(requested) {
-    const rejected = () => ({
+    const rejected = (reason, deniedBy2) => ({
       requested,
       absolute: null,
       display: requested,
       root: null,
-      exists: false
+      exists: false,
+      rejection: reason,
+      ...deniedBy2 ? { deniedBy: deniedBy2 } : {}
     });
-    if (requested.trim() === "") return rejected();
+    if (requested.trim() === "") return rejected("unresolvable");
     const roots = await this.resolveRoots();
     const candidate = isAbsolute(requested) ? resolve(requested) : resolve(roots[0], requested);
     let real;
     try {
       real = await realpathDeepest(candidate);
     } catch {
-      return rejected();
+      return rejected("unresolvable");
     }
     const root = roots.find((r2) => contains(r2, real)) ?? null;
-    if (!root) return rejected();
+    if (!root) return rejected("outside-roots");
     const rel = relative(root, real);
-    if (this.isDenied(rel)) return rejected();
+    const deniedBy = this.deniedBy(rel);
+    if (deniedBy) return rejected("denied", deniedBy);
     let exists = false;
     let onDisk;
     try {
       const info = await stat(real);
-      if (info.isDirectory()) {
-        throw new PathRejected(`${requested} is a directory.`, "not-a-file");
-      }
+      if (info.isDirectory()) return rejected("not-a-file");
+      if (info.size > MAX_FILE_BYTES) return rejected("too-large");
       const body = await readFile(real, "utf8");
       exists = true;
       onDisk = {
         bytes: info.size,
-        lines: body === "" ? 0 : body.split("\n").length,
+        lines: countLines(body),
         sha256: sha256(body),
-        mtimeMs: info.mtimeMs
+        mode: info.mode
       };
     } catch (error40) {
-      if (error40 instanceof PathRejected) throw error40;
-      if (error40.code !== "ENOENT") return rejected();
+      if (error40.code !== "ENOENT") return rejected("unresolvable");
     }
     return {
       requested,
@@ -28680,34 +28829,80 @@ var FsGuard = class {
       onDisk
     };
   }
-  isDenied(relativePath) {
+  /**
+   * Reports which deny pattern refuses a path, if any.
+   *
+   * @param relativePath - Path relative to the root that contains it.
+   * @returns The matching pattern, or null when nothing matched.
+   */
+  deniedBy(relativePath) {
     const normalised = toPosix(relativePath).toLowerCase();
-    if (normalised.startsWith("../")) return true;
-    return this.deny.some(
-      (needle) => needle.endsWith("/") ? normalised.startsWith(needle) || normalised.includes(`/${needle}`) : normalised.includes(needle)
-    );
+    if (normalised.startsWith("../")) return "..";
+    const segments = normalised.split("/");
+    const name = segments[segments.length - 1] ?? "";
+    const directories = segments.slice(0, -1);
+    for (const pattern of this.deny) {
+      if (pattern === "") continue;
+      if (pattern.endsWith("/")) {
+        if (directories.includes(pattern.slice(0, -1))) return pattern;
+        continue;
+      }
+      if (pattern.startsWith(".")) {
+        if (name === pattern || name.startsWith(`${pattern}.`) || name.endsWith(pattern)) {
+          return pattern;
+        }
+        continue;
+      }
+      if (name === pattern || name.startsWith(`${pattern}.`)) return pattern;
+    }
+    return null;
   }
+  /**
+   * Reads a file inside the roots.
+   *
+   * @param absolute - An already-resolved path.
+   * @returns The file contents, or the empty string when it does not exist.
+   * @throws {PathRejected} When the file exists but cannot be read, or exceeds
+   *   {@link MAX_FILE_BYTES}.
+   */
   async read(absolute) {
     try {
+      const info = await stat(absolute);
+      if (info.size > MAX_FILE_BYTES) {
+        throw new PathRejected(
+          `${absolute} is ${info.size} bytes, over the ${MAX_FILE_BYTES}-byte limit.`,
+          "too-large"
+        );
+      }
       return await readFile(absolute, "utf8");
     } catch (error40) {
+      if (error40 instanceof PathRejected) throw error40;
       if (error40.code === "ENOENT") return "";
       throw new PathRejected(`Cannot read ${absolute}.`, "unreadable");
     }
   }
   /**
-   * Write via a temp file in the same directory, then rename. A rename inside
-   * one filesystem is atomic, so a crash mid-write leaves the original intact
-   * rather than half a file.
+   * Writes content to a path, atomically.
+   *
+   * The write goes to a temp file in the same directory and is then renamed,
+   * because a rename within one filesystem is atomic: a crash mid-write leaves
+   * the original intact rather than half a file.
+   *
+   * @param absolute - An already-resolved path inside a root.
+   * @param content - The bytes to write.
+   * @param mode - Permissions of the file being replaced, restored after the
+   *   write so editing a `0755` script does not silently make it `0644`.
+   * @returns The size and hash of what was written.
    */
-  async commit(absolute, content) {
+  async commit(absolute, content, mode) {
     const bytes = Buffer.byteLength(content, "utf8");
     const digest = sha256(content);
     if (this.dryRun) return { bytes, sha256: digest };
     await mkdir(dirname(absolute), { recursive: true });
-    const temp = join(dirname(absolute), `.${Date.now()}.interactive-editor.tmp`);
+    const temp = join(dirname(absolute), `.${randomUUID()}.interactive-editor.tmp`);
     await writeFile(temp, content, "utf8");
     try {
+      if (mode !== void 0) await chmod(temp, mode & 4095);
       await rename(temp, absolute);
     } catch (error40) {
       await rm(temp, { force: true });
@@ -28715,6 +28910,11 @@ var FsGuard = class {
     }
     return { bytes, sha256: digest };
   }
+  /**
+   * Deletes a path inside the roots.
+   *
+   * @param absolute - An already-resolved path.
+   */
   async remove(absolute) {
     if (this.dryRun) return;
     await rm(absolute, { force: true });
@@ -28739,7 +28939,7 @@ async function realpathDeepest(target) {
     } catch {
       const parent = dirname(current);
       if (parent === current) throw new Error(`Cannot resolve ${target}`);
-      missing.push(current.slice(parent.length + 1));
+      missing.push(basename(current));
       current = parent;
     }
   }
@@ -28747,6 +28947,122 @@ async function realpathDeepest(target) {
 function toPosix(p2) {
   return p2.split(sep).join("/");
 }
+
+// src/cli.ts
+function dryRunFromEnv(env) {
+  const raw = env.INTERACTIVE_EDITOR_DRY_RUN?.trim().toLowerCase();
+  return raw === "true" || raw === "1" || raw === "yes";
+}
+var LOOKS_LIKE_FLAG = /^--?[A-Za-z]/;
+function nextValue(flag, argv, index) {
+  const value = argv[index];
+  if (value === void 0 || value.trim() === "") {
+    throw new Error(`${flag} needs a value, and nothing followed it`);
+  }
+  if (LOOKS_LIKE_FLAG.test(value)) {
+    throw new Error(
+      `${flag} needs a value, but ${value} followed it. Write ${flag}=${value} if that really is the value.`
+    );
+  }
+  return value;
+}
+function positiveInt(flag, raw) {
+  const value = Number(raw);
+  if (raw === void 0 || raw === "" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${flag} needs a positive number of milliseconds, got ${raw ?? "nothing"}`);
+  }
+  return value;
+}
+function inlineValue(flag, arg) {
+  const value = arg.slice(flag.length + 1);
+  if (value.trim() === "") throw new Error(`${flag} needs a value`);
+  return value;
+}
+function expandHome(p2, home) {
+  return p2.startsWith("~") ? resolve2(home, p2.slice(1).replace(/^[/\\]/, "")) : resolve2(p2);
+}
+function parseArgs(argv, environment = {}) {
+  const env = environment.env ?? process.env;
+  const cwd = environment.cwd ?? process.cwd();
+  const home = environment.home ?? homedir();
+  const cli = {
+    roots: [],
+    deny: [...DEFAULT_DENY],
+    dryRun: dryRunFromEnv(env),
+    terminalApproval: false,
+    blockOnReview: false
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--root-from-cwd") {
+      cli.roots.push(cwd);
+    } else if (arg === "--terminal-approval") {
+      cli.terminalApproval = true;
+    } else if (arg === "--review-timeout-ms") {
+      cli.reviewTimeoutMs = positiveInt(arg, nextValue(arg, argv, ++i));
+    } else if (arg.startsWith("--review-timeout-ms=")) {
+      cli.reviewTimeoutMs = positiveInt(
+        "--review-timeout-ms",
+        inlineValue("--review-timeout-ms", arg)
+      );
+    } else if (arg === "--block-on-review") {
+      cli.blockOnReview = true;
+    } else if (arg === "--review-grace-ms") {
+      cli.reviewGraceMs = positiveInt(arg, nextValue(arg, argv, ++i));
+    } else if (arg.startsWith("--review-grace-ms=")) {
+      cli.reviewGraceMs = positiveInt("--review-grace-ms", inlineValue("--review-grace-ms", arg));
+    } else if (arg === "--root") {
+      cli.roots.push(expandHome(nextValue(arg, argv, ++i), home));
+    } else if (arg.startsWith("--root=")) {
+      cli.roots.push(expandHome(inlineValue("--root", arg), home));
+    } else if (arg === "--deny") {
+      cli.deny.push(nextValue(arg, argv, ++i));
+    } else if (arg.startsWith("--deny=")) {
+      cli.deny.push(inlineValue("--deny", arg));
+    } else if (arg === "--allow-everything-in-roots") {
+      cli.deny = [];
+    } else if (arg === "--dry-run") {
+      cli.dryRun = true;
+    } else if (arg === "--help" || arg === "-h") {
+      cli.help = true;
+    } else if (!arg.startsWith("-")) {
+      cli.roots.push(expandHome(arg, home));
+    } else {
+      throw new Error(`Unknown flag ${arg}`);
+    }
+  }
+  return cli;
+}
+var HELP = `interactive-editor \u2014 a live-edit review panel in front of every file write.
+
+Usage:
+  node <path-to-server> --root <dir> [--root <dir> ...] [options]
+
+Options:
+  --root <dir>                 A directory the editor may write inside. Required, repeatable.
+  --root-from-cwd              Add the working directory as a root. For hosts that
+                               launch the server inside the project (Claude Code).
+  --deny <substring>           Extra path substring to refuse. Repeatable.
+  --allow-everything-in-roots  Drop the built-in deny list (.git, node_modules, .env, keys...).
+  --dry-run                    Run the whole flow but never touch disk.
+  --terminal-approval          Expose the commit tool to the agent, for hosts that
+                               cannot render the editor. You get your client's
+                               approve/deny prompt instead of an editor. Weaker.
+  --block-on-review            Hold the opening call open until the human accepts or
+                               comments, so its result is the decision. Needs a host
+                               that dispatches the panel's calls while one is open;
+                               where it does not, the panel never loads. Off by default.
+  --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
+  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 30000.
+  -h, --help                   This.
+
+A value that begins with a flag is refused rather than consumed, so a missing
+argument stops the server instead of quietly changing what the next flag meant.
+Write --flag=value when a value genuinely starts with a dash.
+
+Every write goes through a View the human edits and approves. The agent can open
+the editor; only a click can walk through it.
+`;
 
 // node_modules/@modelcontextprotocol/ext-apps/dist/src/server/index.js
 init_v4();
@@ -28848,6 +29164,14 @@ function Y3(Z) {
   return Z.extensions?.[TQ];
 }
 
+// src/hostCapability.ts
+function rendersPanel(capabilities) {
+  const ui = Y3(capabilities);
+  if (typeof ui !== "object" || ui === null) return false;
+  const declared = ui.mimeTypes;
+  return Array.isArray(declared) && declared.includes(p);
+}
+
 // src/review.ts
 var REVIEW_TIMEOUT_MS = 10 * 60 * 1e3;
 var REVIEW_GRACE_MS = 3e4;
@@ -28856,16 +29180,16 @@ function awaitReview(proposalId, timeoutMs = REVIEW_TIMEOUT_MS) {
   if (waiting.has(proposalId)) {
     throw new Error(`Already waiting on a review for ${proposalId}.`);
   }
-  return new Promise((resolve5) => {
+  return new Promise((resolve4) => {
     const timer = setTimeout(() => {
       waiting.delete(proposalId);
-      resolve5({
+      resolve4({
         kind: "unanswered",
         why: `Nobody responded in the editor within ${Math.round(timeoutMs / 6e4)} minutes.`
       });
     }, timeoutMs);
     timer.unref?.();
-    waiting.set(proposalId, { resolve: resolve5, timer });
+    waiting.set(proposalId, { resolve: resolve4, timer });
   });
 }
 function resolveReview(proposalId, outcome) {
@@ -28876,35 +29200,46 @@ function resolveReview(proposalId, outcome) {
   found.resolve(outcome);
   return true;
 }
+function isAwaitingReview(proposalId) {
+  return waiting.has(proposalId);
+}
 
 // src/tools/view.ts
 import { readFile as readFile2 } from "node:fs/promises";
-import { dirname as dirname2, resolve as resolve2 } from "node:path";
+import { dirname as dirname2, resolve as resolve3 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/tools/context.ts
 var VIEW_URI = "ui://interactive-editor/panel.html";
 
 // src/tools/view.ts
+var UI_META = {
+  csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
+  prefersBorder: true
+};
 function registerEditorView(server) {
   N3(
     server,
     "Interactive Editor",
     VIEW_URI,
-    {
-      mimeType: p,
-      _meta: {
-        ui: {
-          // The bundle is inlined, so the View needs nothing from the network.
-          // Every list stays empty on purpose: an editor that can phone home is
-          // a worse thing than the writes it is guarding.
-          csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
-          prefersBorder: true
-        }
-      }
-    },
+    { mimeType: p, _meta: { ui: UI_META } },
     async (uri) => ({
-      contents: [{ uri: uri.href, mimeType: p, text: await loadViewHtml() }]
+      /*
+       * The same metadata on the content item, not only on the listing entry.
+       * MCP Apps § Resource Metadata builds the sandbox CSP from what
+       * `resources/read` returns; the listing entry is documented as a
+       * fallback, and a server is free to omit UI resources from
+       * `resources/list` entirely — in which case the listing is never read and
+       * `prefersBorder` is lost with it.
+       */
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: p,
+          text: await loadViewHtml(),
+          _meta: { ui: UI_META }
+        }
+      ]
     })
   );
 }
@@ -28916,7 +29251,7 @@ async function loadViewHtml() {
   const missing = [];
   const rejected = [];
   for (const candidate of PANEL_CANDIDATES) {
-    const path = resolve2(here, candidate);
+    const path = resolve3(here, candidate);
     let html;
     try {
       html = await readFile2(path, "utf8");
@@ -28951,123 +29286,38 @@ function whyNotPanel(html) {
   return null;
 }
 
-// src/proposals.ts
-import { randomUUID } from "node:crypto";
-import { resolve as resolve3 } from "node:path";
+// src/tools/limits.ts
+var MAX_PATH_CHARS = 4096;
+var pathInput = external_exports.string().min(1, "The path is empty.").max(MAX_PATH_CHARS, `The path is longer than ${MAX_PATH_CHARS} characters.`);
+var contentInput = external_exports.string().max(
+  MAX_FILE_BYTES,
+  `The content is larger than the ${MAX_FILE_BYTES / (1024 * 1024)} MB this editor will review.`
+);
 
-// shared/diff.ts
-var LCS_LINE_BUDGET = 1500;
-var CONTEXT_LINES = 3;
-function splitLines(text) {
-  if (text === "") return [];
-  return text.replace(/\r\n/g, "\n").split("\n");
+// src/proposals.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+
+// shared/rejection.ts
+function rejectionDetail(target, roots) {
+  const reason = target.rejection ?? "unresolvable";
+  switch (reason) {
+    case "outside-roots":
+      return `It is outside the roots this editor will write to.
+Writable roots:
+${roots.map((r2) => `  ${r2}`).join("\n")}`;
+    case "denied":
+      return `It matches the deny list${target.deniedBy ? ` (${target.deniedBy})` : ""}, so this editor will not touch it even though it is inside a writable root. Start the server with --deny to choose your own patterns.`;
+    case "not-a-file":
+      return "It is a directory, not a file.";
+    case "too-large":
+      return "It is too large to review in an editor.";
+    case "unresolvable":
+    default:
+      return "It could not be resolved to a path on disk.";
+  }
 }
-function diffLines(before, after) {
-  const a = splitLines(before);
-  const b = splitLines(after);
-  let prefix = 0;
-  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix += 1;
-  let suffix = 0;
-  while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) {
-    suffix += 1;
-  }
-  const midA = a.slice(prefix, a.length - suffix);
-  const midB = b.slice(prefix, b.length - suffix);
-  const truncated = midA.length > LCS_LINE_BUDGET && midB.length > LCS_LINE_BUDGET;
-  const middle = truncated ? wholesaleReplace(midA, midB, prefix) : lcsDiff(midA, midB, prefix);
-  const lines = [
-    ...a.slice(0, prefix).map((text, i) => line("equal", i + 1, i + 1, text)),
-    ...middle,
-    ...a.slice(a.length - suffix).map((text, i) => line("equal", a.length - suffix + i + 1, b.length - suffix + i + 1, text))
-  ];
-  const stats = {
-    added: lines.filter((l) => l.kind === "add").length,
-    removed: lines.filter((l) => l.kind === "remove").length,
-    ...truncated ? { truncated: true } : {}
-  };
-  return { hunks: toHunks(lines), stats };
-}
-function line(kind, oldLine, newLine, text) {
-  return { kind, oldLine, newLine, text };
-}
-function wholesaleReplace(a, b, offset) {
-  return [
-    ...a.map((text, i) => line("remove", offset + i + 1, null, text)),
-    ...b.map((text, i) => line("add", null, offset + i + 1, text))
-  ];
-}
-function lcsDiff(a, b, offset) {
-  const n = a.length;
-  const m2 = b.length;
-  const table = new Uint32Array((n + 1) * (m2 + 1));
-  const at = (i2, j3) => i2 * (m2 + 1) + j3;
-  for (let i2 = n - 1; i2 >= 0; i2 -= 1) {
-    for (let j3 = m2 - 1; j3 >= 0; j3 -= 1) {
-      table[at(i2, j3)] = a[i2] === b[j3] ? table[at(i2 + 1, j3 + 1)] + 1 : Math.max(table[at(i2 + 1, j3)], table[at(i2, j3 + 1)]);
-    }
-  }
-  const out = [];
-  let i = 0;
-  let j2 = 0;
-  while (i < n && j2 < m2) {
-    if (a[i] === b[j2]) {
-      out.push(line("equal", offset + i + 1, offset + j2 + 1, a[i]));
-      i += 1;
-      j2 += 1;
-    } else if (table[at(i + 1, j2)] >= table[at(i, j2 + 1)]) {
-      out.push(line("remove", offset + i + 1, null, a[i]));
-      i += 1;
-    } else {
-      out.push(line("add", null, offset + j2 + 1, b[j2]));
-      j2 += 1;
-    }
-  }
-  while (i < n) {
-    out.push(line("remove", offset + i + 1, null, a[i]));
-    i += 1;
-  }
-  while (j2 < m2) {
-    out.push(line("add", null, offset + j2 + 1, b[j2]));
-    j2 += 1;
-  }
-  return out;
-}
-function toHunks(lines) {
-  const changed = lines.map((l, i) => l.kind === "equal" ? -1 : i).filter((i) => i !== -1);
-  if (changed.length === 0) return [];
-  const ranges = [];
-  for (const index of changed) {
-    const start = Math.max(0, index - CONTEXT_LINES);
-    const end = Math.min(lines.length - 1, index + CONTEXT_LINES);
-    const last = ranges[ranges.length - 1];
-    if (last && start <= last[1] + 1) {
-      last[1] = Math.max(last[1], end);
-    } else {
-      ranges.push([start, end]);
-    }
-  }
-  return ranges.map(([start, end]) => {
-    const slice = lines.slice(start, end + 1);
-    return {
-      oldStart: slice.find((l) => l.oldLine !== null)?.oldLine ?? 0,
-      newStart: slice.find((l) => l.newLine !== null)?.newLine ?? 0,
-      lines: slice
-    };
-  });
-}
-function formatUnifiedDiff(hunks, label) {
-  if (hunks.length === 0) return `(no changes to ${label})`;
-  const out = [`--- ${label} (on disk)`, `+++ ${label} (proposed)`];
-  for (const hunk of hunks) {
-    const oldCount = hunk.lines.filter((l) => l.kind !== "add").length;
-    const newCount = hunk.lines.filter((l) => l.kind !== "remove").length;
-    out.push(`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`);
-    for (const line2 of hunk.lines) {
-      const marker = line2.kind === "add" ? "+" : line2.kind === "remove" ? "-" : " ";
-      out.push(marker + line2.text);
-    }
-  }
-  return out.join("\n");
+function explainRejection(target, roots) {
+  return `Refused: "${target.requested}" \u2014 ${rejectionDetail(target, roots)}`;
 }
 
 // shared/lint.ts
@@ -29076,10 +29326,11 @@ var DESTRUCTIVE_MIN_LINES = 10;
 var DESTRUCTIVE_MIN_REMOVED = 5;
 var LARGE_FILE_LINES = 5e3;
 var NUL = String.fromCharCode(0);
-function lintProposal(proposal, stats) {
+function lintProposal(proposal, stats, roots) {
   const findings = [
-    ...lintTarget(proposal),
+    ...lintTarget(proposal, roots),
     ...lintDestructiveness(proposal, stats),
+    ...lintDiff(stats),
     ...lintContentHygiene(proposal)
   ];
   return findings.sort((a, b) => weight(b.severity) - weight(a.severity));
@@ -29087,7 +29338,7 @@ function lintProposal(proposal, stats) {
 function weight(severity) {
   return severity === "blocker" ? 2 : severity === "warning" ? 1 : 0;
 }
-function lintTarget(proposal) {
+function lintTarget(proposal, roots) {
   const { target } = proposal;
   if (!target.absolute) {
     return [
@@ -29096,7 +29347,7 @@ function lintTarget(proposal) {
         rule: "path",
         severity: "blocker",
         message: `"${target.requested}" is not a path this server will write to.`,
-        detail: "It resolves outside every configured root, or it could not be resolved at all."
+        detail: rejectionDetail(target, roots)
       }
     ];
   }
@@ -29162,6 +29413,10 @@ function lintDestructiveness(proposal, stats) {
       message: `This empties ${proposal.target.display}.`
     });
   }
+  return findings;
+}
+function lintDiff(stats) {
+  const findings = [];
   if (stats.truncated) {
     findings.push({
       id: "diff-truncated",
@@ -29169,6 +29424,15 @@ function lintDestructiveness(proposal, stats) {
       severity: "warning",
       message: "Both versions are too large to diff line by line.",
       detail: "The diff below shows a wholesale replacement, not a real comparison. Read the content itself."
+    });
+  }
+  if (stats.newlineAtEofChanged) {
+    findings.push({
+      id: "newline-at-eof",
+      rule: "diff",
+      severity: "info",
+      message: "Only the newline at the end of the file changes.",
+      detail: "No line differs, so the diff below has nothing to show \u2014 but the bytes on disk do change."
     });
   }
   return findings;
@@ -29205,14 +29469,24 @@ function lintContentHygiene(proposal) {
       message: "CRLF endings, but the file on disk uses LF.",
       fix: { label: "Match the file", content: content.replace(/\r\n/g, "\n") }
     });
+  } else if (!hasCrlf && hasBareLf && baseline.includes("\r\n") && !/(?<!\r)\n/.test(baseline)) {
+    findings.push({
+      id: "eol-rewrite",
+      rule: "hygiene",
+      severity: "warning",
+      message: "LF endings, but the file on disk uses CRLF.",
+      detail: "Every line ending in the file would be rewritten. The diff compares lines without their terminators, so it cannot show this.",
+      fix: { label: "Keep CRLF", content: content.replace(/\n/g, "\r\n") }
+    });
   }
-  if (/[ \t]+$/m.test(content)) {
+  const stripped = stripTrailingWhitespace(content);
+  if (stripped !== content) {
     findings.push({
       id: "trailing-whitespace",
       rule: "hygiene",
       severity: "info",
       message: "Trailing whitespace on one or more lines.",
-      fix: { label: "Strip it", content: content.replace(/[ \t]+$/gm, "") }
+      fix: { label: "Strip it", content: stripped }
     });
   }
   const indentOnDisk = dominantIndent(baseline);
@@ -29245,6 +29519,14 @@ function lintContentHygiene(proposal) {
   }
   return findings;
 }
+function stripTrailingWhitespace(text) {
+  return text.split(/(\r?\n)/).map((part, index) => index % 2 === 0 ? trimLineEnd(part) : part).join("");
+}
+function trimLineEnd(line2) {
+  let end = line2.length;
+  while (end > 0 && (line2[end - 1] === " " || line2[end - 1] === "	")) end -= 1;
+  return end === line2.length ? line2 : line2.slice(0, end);
+}
 function dominantIndent(text) {
   let tabs = 0;
   let spaces = 0;
@@ -29261,16 +29543,39 @@ function hasBlockers(findings) {
   return findings.some((f2) => f2.severity === "blocker");
 }
 
+// shared/state.ts
+function proposedContent(proposal) {
+  return proposal.mode === "delete" ? "" : proposal.content;
+}
+function composeState(proposal, context) {
+  const { hunks, stats } = diffLines(proposal.baseline, proposedContent(proposal));
+  return {
+    proposal,
+    findings: lintProposal(proposal, stats, context.roots),
+    diff: hunks,
+    stats,
+    roots: context.roots,
+    dryRun: context.dryRun,
+    serverVersion: context.serverVersion
+  };
+}
+
 // src/version.ts
-var SERVER_VERSION = "0.5.2";
+var SERVER_VERSION = "0.6.1";
 
 // src/proposals.ts
 var proposals = /* @__PURE__ */ new Map();
+var MAX_RETAINED = 32;
+var PROPOSAL_TTL_MS = 60 * 60 * 1e3;
+var evicted = /* @__PURE__ */ new Map();
 async function createProposal(guard, input) {
-  const target = await guard.describe(input.path);
-  const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
+  const target = input.target ?? await guard.describe(input.path);
+  const baseline = input.target && input.baseline !== void 0 ? input.baseline : target.absolute && target.exists ? await guard.read(target.absolute) : "";
+  for (const open of openProposals()) {
+    if (sameTarget(open.target, target)) resolveProposal(open.proposalId, "superseded");
+  }
   const proposal = {
-    proposalId: randomUUID(),
+    proposalId: randomUUID2(),
     mode: input.mode,
     target,
     content: input.mode === "delete" ? "" : input.content,
@@ -29278,14 +29583,20 @@ async function createProposal(guard, input) {
     baseline,
     rationale: input.rationale,
     attached: false,
-    destructiveAcknowledged: false
+    destructiveAcknowledged: false,
+    createdAt: Date.now()
   };
   proposals.set(proposal.proposalId, proposal);
+  evict();
   return proposal;
 }
 function getProposal(proposalId) {
   const proposal = proposals.get(proposalId);
   if (!proposal) {
+    const ended = evicted.get(proposalId);
+    if (ended) {
+      throw new Error(`This proposal was ${ended} to make room for newer ones. Open a new one.`);
+    }
     throw new Error(
       `Unknown proposal ${proposalId}. It probably belongs to a previous run of the server.`
     );
@@ -29294,79 +29605,111 @@ function getProposal(proposalId) {
 }
 function updateProposal(proposalId, patch) {
   const current = getProposal(proposalId);
-  if (current.committedAt) {
-    throw new Error("This proposal has already been committed. Open a new one.");
+  if (current.resolvedAt) {
+    throw new Error(
+      `This proposal was already ${current.resolution ?? "resolved"}. Open a new one.`
+    );
   }
   const next = { ...current, ...patch, proposalId: current.proposalId };
   proposals.set(proposalId, next);
   return next;
 }
-async function refreshTarget(guard, proposal) {
+function resolveProposal(proposalId, resolution) {
+  const current = getProposal(proposalId);
+  const next = { ...current, resolvedAt: (/* @__PURE__ */ new Date()).toISOString(), resolution };
+  proposals.set(proposalId, next);
+  return next;
+}
+async function restatTarget(guard, proposal) {
   const target = await guard.describe(proposal.target.requested);
   const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
-  return updateProposal(proposal.proposalId, { target, baseline });
+  return { target, baseline };
+}
+function isStale(baselineNow, baselineAtOpen) {
+  return sha256(baselineNow) !== sha256(baselineAtOpen);
 }
 function buildEditorState(guard, proposal) {
-  const after = proposal.mode === "delete" ? "" : proposal.content;
-  const { hunks, stats } = diffLines(proposal.baseline, after);
-  return {
-    proposal,
-    findings: lintProposal(proposal, stats),
-    diff: hunks,
+  return composeState(proposal, {
     roots: guard.roots,
     dryRun: guard.dryRun,
     serverVersion: SERVER_VERSION
-  };
-}
-function diffStatsFor(proposal) {
-  const after = proposal.mode === "delete" ? "" : proposal.content;
-  return diffLines(proposal.baseline, after).stats;
+  });
 }
 function findOpenProposal(path) {
-  const open = [...proposals.values()].filter((p2) => !p2.committedAt);
+  const open = openProposals();
   if (open.length === 0) return void 0;
   if (path === void 0) return open[open.length - 1];
   const exact = open.filter((p2) => p2.target.requested === path);
   if (exact.length > 0) return exact[exact.length - 1];
-  const resolved = open.filter((p2) => samePath(p2.target.requested, path));
+  const resolved = open.filter((p2) => namesTarget(p2.target, path));
   if (resolved.length > 0) return resolved[resolved.length - 1];
   return open.length === 1 ? open[0] : void 0;
 }
-function samePath(a, b) {
-  const normalise = (p2) => resolve3(p2).split("\\").join("/").toLowerCase();
-  try {
-    return normalise(a) === normalise(b);
-  } catch {
-    return false;
-  }
+function sameTarget(a, b) {
+  return a.absolute !== null && a.absolute === b.absolute;
+}
+var foldsCase = process.platform === "win32" || process.platform === "darwin";
+function forCompare(p2) {
+  const slashed = p2.split("\\").join("/");
+  return foldsCase ? slashed.toLowerCase() : slashed;
+}
+function namesTarget(target, path) {
+  const wanted = forCompare(path);
+  if (forCompare(target.requested) === wanted) return true;
+  if (!target.absolute) return false;
+  const absolute = forCompare(target.absolute);
+  return absolute === wanted || absolute.endsWith(`/${wanted}`);
 }
 function openProposals() {
-  return [...proposals.values()].filter((p2) => !p2.committedAt);
+  const cutoff = Date.now() - PROPOSAL_TTL_MS;
+  return [...proposals.values()].filter((p2) => !p2.resolvedAt && p2.createdAt >= cutoff);
+}
+function evict() {
+  if (proposals.size <= MAX_RETAINED) return;
+  const cutoff = Date.now() - PROPOSAL_TTL_MS;
+  for (const [id, proposal] of proposals) {
+    if (proposals.size <= MAX_RETAINED) return;
+    if (proposal.resolvedAt || proposal.createdAt < cutoff) proposals.delete(id);
+  }
+  while (proposals.size > MAX_RETAINED) {
+    const oldest = proposals.keys().next().value;
+    if (oldest === void 0) break;
+    const doomed = proposals.get(oldest);
+    if (doomed && !doomed.resolvedAt) evicted.set(oldest, "superseded");
+    proposals.delete(oldest);
+  }
 }
 
-// src/tools/results.ts
+// src/tools/wording.ts
 var MODEL_DIFF_LINE_BUDGET = 80;
+var MODEL_DIFF_CHAR_BUDGET = 8e3;
 function handleFor(state) {
   const { proposal } = state;
   return {
     proposalId: proposal.proposalId,
     display: proposal.target.display,
     mode: proposal.mode,
-    ...proposal.target.absolute ? {} : { refused: true }
+    ...proposal.target.absolute ? {} : { refused: true, rejection: proposal.target.rejection ?? "unresolvable" }
   };
 }
+function outcomeDescription(context) {
+  return context.blockOnReview ? "It does not return until the human acts: either they accept it and the result is a receipt for what landed, or they comment on it, which is a rejection \u2014 nothing is written and the result carries what they want changed, for you to redraft." : "It returns as soon as the panel is open, so the result is the diff rather than the verdict. The outcome arrives separately: a receipt if they saved, or their comments quoted against the lines they are about. Comments mean the draft was declined and nothing was written, so redraft from what they said rather than re-proposing.";
+}
 function openerResult(state) {
+  const refused = !state.proposal.target.absolute;
   return {
     content: [{ type: "text", text: describeState(state) }],
-    structuredContent: handleFor(state)
+    structuredContent: handleFor(state),
+    ...refused ? { isError: true } : {}
   };
 }
 function openedFileResult(state) {
   const { target } = state.proposal;
-  const text = target.absolute ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : `Refused: "${target.requested}" is outside the roots this editor will write to.`;
+  const text = target.absolute ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : explainRejection(target, state.roots);
   return {
     content: [{ type: "text", text }],
-    structuredContent: handleFor(state)
+    structuredContent: handleFor(state),
+    ...target.absolute ? {} : { isError: true }
   };
 }
 function panelResult(state, note) {
@@ -29377,12 +29720,8 @@ function panelResult(state, note) {
 }
 function describeState(state) {
   const { proposal, findings } = state;
-  if (!proposal.target.absolute) {
-    return `Refused: "${proposal.target.requested}" is outside the roots this editor will write to.
-Writable roots:
-${state.roots.map((r2) => `  ${r2}`).join("\n")}`;
-  }
-  const stats = diffStatsFor(proposal);
+  if (!proposal.target.absolute) return explainRejection(proposal.target, state.roots);
+  const { stats } = state;
   const lines = [
     `Editor open \u2014 nothing has been written.`,
     ``,
@@ -29405,28 +29744,44 @@ ${state.roots.map((r2) => `  ${r2}`).join("\n")}`;
   return lines.join("\n");
 }
 function diffForModel(state) {
-  const full = formatUnifiedDiff(state.diff, state.proposal.target.display);
+  const { proposal } = state;
+  const full = formatUnifiedDiff(state.diff, proposal.target.display, {
+    before: endsWithNewline(proposal.baseline),
+    after: endsWithNewline(proposedContent(proposal))
+  });
   const lines = full.split("\n");
-  if (lines.length <= MODEL_DIFF_LINE_BUDGET) return full;
+  if (lines.length <= MODEL_DIFF_LINE_BUDGET && full.length <= MODEL_DIFF_CHAR_BUDGET) return full;
+  const kept = [];
+  let spent = 0;
+  for (const text of lines.slice(0, MODEL_DIFF_LINE_BUDGET)) {
+    if (spent + text.length > MODEL_DIFF_CHAR_BUDGET) break;
+    kept.push(text);
+    spent += text.length + 1;
+  }
+  const dropped = lines.length - kept.length;
   return [
-    ...lines.slice(0, MODEL_DIFF_LINE_BUDGET),
-    `\u2026 and ${lines.length - MODEL_DIFF_LINE_BUDGET} more diff lines, shown in full in the panel.`
+    ...kept,
+    dropped > 0 ? `\u2026 and ${dropped} more diff lines, shown in full in the panel.` : `\u2026 truncated at ${MODEL_DIFF_CHAR_BUDGET} characters. The panel shows all of it.`
   ].join("\n");
-}
-function describeReceipt(receipt) {
-  const verb = receipt.mode === "delete" ? "Deleted" : "Wrote";
-  const edited = receipt.editedByHuman ? " The human edited your proposal before approving it \u2014 the content above is what actually landed." : "";
-  return `${verb} ${receipt.display} (${receipt.lines} lines, ${receipt.bytes} bytes).` + (receipt.dryRun ? " DRY RUN \u2014 nothing reached disk." : "") + edited;
 }
 function errorResult(message) {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+// shared/receipt.ts
+function describeCommit(receipt) {
+  const verb = receipt.mode === "delete" ? "Deleted" : "Wrote";
+  const edited = receipt.editedByHuman ? " The human edited your proposal before approving it, so what landed is not what you wrote." : "";
+  return `${verb} ${receipt.display} (${receipt.lines} lines, ${receipt.bytes} bytes).` + (receipt.dryRun ? " DRY RUN \u2014 nothing reached disk." : "") + edited;
+}
+
 // src/tools/awaitReview.ts
+var ATTACH_POLL_MS = 25;
 async function waitForReview(context, proposalId, opened) {
   if (!context.blockOnReview || !context.canRenderPanel()) return opened;
   const settled = awaitReview(proposalId, context.reviewTimeoutMs);
-  if (!await attachedWithin(proposalId, context.reviewGraceMs)) {
+  const attached = await attachedWithin(proposalId, context.reviewGraceMs);
+  if (!attached && isAwaitingReview(proposalId)) {
     resolveReview(proposalId, {
       kind: "unanswered",
       why: "This host advertises MCP Apps but no editor attached to the proposal."
@@ -29438,17 +29793,20 @@ async function attachedWithin(proposalId, graceMs) {
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
     if (getProposal(proposalId).attached) return true;
-    await new Promise((r2) => setTimeout(r2, 25));
+    if (!isAwaitingReview(proposalId)) return false;
+    await new Promise((r2) => setTimeout(r2, ATTACH_POLL_MS));
   }
   return getProposal(proposalId).attached;
 }
 function describeOutcome(outcome, opened) {
   switch (outcome.kind) {
-    case "committed":
+    case "committed": {
+      const { content: _body, ...receipt } = outcome.receipt;
       return {
-        content: [{ type: "text", text: describeReceipt(outcome.receipt) }],
-        structuredContent: outcome.receipt
+        content: [{ type: "text", text: describeCommit(outcome.receipt) }],
+        structuredContent: receipt
       };
+    }
     case "changes-requested":
       return {
         content: [
@@ -29486,22 +29844,27 @@ function registerProposeWrite(server, context) {
     "propose_write",
     {
       title: "Propose a file write",
-      description: "Open an editable review panel for writing a file. Shows the human a diff against what is on disk, lets them edit your proposed content directly, and waits for them to decide. This tool NEVER writes anything itself. It does not return until they act: either they accept it and the result is a receipt for what landed, or they comment on it, which is a rejection \u2014 nothing is written and the result carries what they want changed, for you to redraft and propose again.",
+      description: "Opens an editable review panel for writing a file. Shows the human a diff against what is on disk and lets them edit the proposed content directly before it lands. This tool never writes anything itself. " + outcomeDescription(context),
       inputSchema: {
-        path: external_exports.string().describe("File to write. Absolute, or relative to the first configured root."),
-        content: external_exports.string().describe("The full new contents of the file."),
+        path: pathInput.describe(
+          "File to write. Absolute, or relative to the first configured root."
+        ),
+        content: contentInput.describe("The full new contents of the file."),
         rationale: external_exports.string().optional().describe("One or two sentences on why this write. Shown to the human above the editor.")
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { resourceUri: VIEW_URI, visibility: ["model", "app"] } }
     },
     async ({ path, content, rationale }) => {
       const target = await guard.describe(path);
+      const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
       const proposal = await createProposal(guard, {
         path,
         content,
         mode: target.exists ? "overwrite" : "create",
-        rationale
+        rationale,
+        target,
+        baseline
       });
       const opened = openerResult(buildEditorState(guard, proposal));
       return waitForReview(context, proposal.proposalId, opened);
@@ -29517,12 +29880,14 @@ function registerOpenFile(server, context) {
     "open_file",
     {
       title: "Open a file for the human to edit",
-      description: "Open a file in the review panel so the human can read it and change it by hand. Loads the current contents into the editor; nothing is written until they press the button. Use this when they want to look at or edit a file themselves rather than have you rewrite it \u2014 and note that the file body goes to the panel, not into your context, so use read_file if you need to see it too.",
+      description: "Opens a file in the review panel so the human can read it and change it by hand. Loads the current contents into the editor; nothing is written until they press the button. Use this when they want to look at or edit a file themselves rather than have you rewrite it. The file body goes to the panel, not into your context, so call read_file if you need to see it too. " + outcomeDescription(context),
       inputSchema: {
-        path: external_exports.string().describe("File to open. Absolute, or relative to the first configured root."),
+        path: pathInput.describe(
+          "File to open. Absolute, or relative to the first configured root."
+        ),
         note: external_exports.string().optional().describe("Optional line shown above the editor, e.g. what they asked for.")
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { resourceUri: VIEW_URI, visibility: ["model", "app"] } }
     },
     async ({ path, note }) => {
@@ -29532,7 +29897,9 @@ function registerOpenFile(server, context) {
         path,
         content: current,
         mode: target.exists ? "overwrite" : "create",
-        rationale: note ?? "Opened for editing. Nothing changes until it is saved."
+        rationale: note ?? "Opened for editing. Nothing changes until it is saved.",
+        target,
+        baseline: current
       });
       const opened = openedFileResult(buildEditorState(guard, proposal));
       return waitForReview(context, proposal.proposalId, opened);
@@ -29548,20 +29915,27 @@ function registerProposeDelete(server, context) {
     "propose_delete",
     {
       title: "Propose a file deletion",
-      description: "Open a review panel for deleting a file. Shows the human everything that would be lost and waits for an explicit confirmation. Never deletes anything itself.",
+      description: "Opens a review panel for deleting a file. Shows the human everything that would be lost and waits for an explicit confirmation. Never deletes anything itself. " + outcomeDescription(context),
       inputSchema: {
-        path: external_exports.string().describe("File to delete."),
+        path: pathInput.describe("File to delete."),
         rationale: external_exports.string().optional().describe("Why this file should go.")
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       _meta: { ui: { resourceUri: VIEW_URI, visibility: ["model", "app"] } }
     },
     async ({ path, rationale }) => {
+      const target = await guard.describe(path);
+      if (target.absolute && !target.exists) {
+        return errorResult(`${target.display} does not exist, so there is nothing to delete.`);
+      }
+      const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
       const proposal = await createProposal(guard, {
         path,
         content: "",
         mode: "delete",
-        rationale
+        rationale,
+        target,
+        baseline
       });
       const opened = openerResult(buildEditorState(guard, proposal));
       return waitForReview(context, proposal.proposalId, opened);
@@ -29578,11 +29952,12 @@ function registerEditorAttach(server, { guard }) {
       title: "Attach the panel to a proposal",
       description: "Called by the panel when it mounts. Not for agent use.",
       inputSchema: { proposalId: external_exports.string() },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId }) => {
-      await refreshTarget(guard, getProposal(proposalId));
-      const proposal = updateProposal(proposalId, { attached: true });
+      const { target, baseline } = await restatTarget(guard, getProposal(proposalId));
+      const proposal = updateProposal(proposalId, { target, baseline, attached: true });
       return panelResult(
         buildEditorState(guard, proposal),
         "Attached. The panel has the proposal."
@@ -29601,27 +29976,17 @@ function registerEditorUpdate(server, { guard }) {
       description: "Called by the panel as the human edits. Not for agent use.",
       inputSchema: {
         proposalId: external_exports.string(),
-        content: external_exports.string().optional(),
-        path: external_exports.string().optional(),
+        content: contentInput.optional(),
         destructiveAcknowledged: external_exports.boolean().optional()
       },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } }
     },
-    async ({ proposalId, content, path, destructiveAcknowledged }) => {
-      const current = getProposal(proposalId);
-      let next = updateProposal(proposalId, {
+    async ({ proposalId, content, destructiveAcknowledged }) => {
+      const next = updateProposal(proposalId, {
         ...content !== void 0 ? { content } : {},
         ...destructiveAcknowledged !== void 0 ? { destructiveAcknowledged } : {}
       });
-      if (path !== void 0 && path !== current.target.requested) {
-        const target = await guard.describe(path);
-        const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
-        next = updateProposal(proposalId, {
-          target,
-          baseline,
-          mode: next.mode === "delete" ? "delete" : target.exists ? "overwrite" : "create"
-        });
-      }
       return panelResult(buildEditorState(guard, next), "Updated.");
     }
   );
@@ -29629,9 +29994,23 @@ function registerEditorUpdate(server, { guard }) {
 
 // src/tools/commit.ts
 async function commit(context, proposalId) {
-  const { guard } = context;
   const before = getProposal(proposalId);
-  if (before.committedAt) throw new Error("This proposal has already been resolved.");
+  if (before.resolvedAt) {
+    throw new Error(`This proposal was already ${before.resolution ?? "resolved"}.`);
+  }
+  if (committing.has(proposalId)) {
+    throw new Error("This proposal is already being written. Wait for that to finish.");
+  }
+  committing.add(proposalId);
+  try {
+    return await write(context, proposalId, before);
+  } finally {
+    committing.delete(proposalId);
+  }
+}
+var committing = /* @__PURE__ */ new Set();
+async function write(context, proposalId, before) {
+  const { guard } = context;
   if (!context.terminalApproval && !context.canRenderPanel()) {
     throw new Error(
       "This host does not render MCP Apps, so the editor never appeared and nobody has seen this diff. Refusing to write. Start the server with --terminal-approval to fall back to your client's own approve/deny prompt instead."
@@ -29641,30 +30020,33 @@ async function commit(context, proposalId) {
     throw new Error("This proposal was never opened in the editor. Refusing to write.");
   }
   const baselineAtOpen = before.baseline;
-  const proposal = await refreshTarget(guard, before);
-  if (!proposal.target.absolute) {
-    throw new Error(`${proposal.target.requested} is not a writable path.`);
+  const { target, baseline } = await restatTarget(guard, before);
+  const absolute = target.absolute;
+  if (!absolute) {
+    throw new Error(`${target.requested} is not a writable path.`);
   }
-  if (sha256(proposal.baseline) !== sha256(baselineAtOpen)) {
+  if (isStale(baseline, baselineAtOpen)) {
+    resolveProposal(proposalId, "superseded");
     throw new Error(
-      `${proposal.target.display} changed on disk while the editor was open. The diff that was approved is no longer the diff that would be applied. Reopen the proposal.`
+      `${target.display} changed on disk while the editor was open. The diff that was approved is not the diff that would be applied. This proposal is closed; open a new one against the current file.`
     );
   }
+  const proposal = updateProposal(proposalId, { target, baseline });
   const findings = buildEditorState(guard, proposal).findings;
   if (hasBlockers(findings)) {
     const blockers = findings.filter((f2) => f2.severity === "blocker").map((f2) => f2.message);
     throw new Error(`Refusing to write:
 ${blockers.map((b) => `  - ${b}`).join("\n")}`);
   }
-  const result = proposal.mode === "delete" ? (await guard.remove(proposal.target.absolute), { bytes: 0, sha256: sha256("") }) : await guard.commit(proposal.target.absolute, proposal.content);
-  updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
+  const result = proposal.mode === "delete" ? (await guard.remove(absolute), { bytes: 0, sha256: sha256("") }) : await guard.commit(absolute, proposal.content, proposal.target.onDisk?.mode);
+  resolveProposal(proposalId, "committed");
   return {
     ok: true,
-    path: proposal.target.absolute,
+    path: absolute,
     display: proposal.target.display,
     mode: proposal.mode,
     bytes: result.bytes,
-    lines: proposal.content === "" ? 0 : proposal.content.split("\n").length,
+    lines: countLines(proposal.content),
     sha256: result.sha256,
     dryRun: guard.dryRun,
     editedByHuman: proposal.content !== proposal.originalContent,
@@ -29681,13 +30063,19 @@ function registerEditorCommit(server, context) {
       title: "Commit the reviewed write",
       description: "The editor. Writes the human-approved content to disk. Called only by the panel, only on an explicit click. Not for agent use \u2014 and in a host that cannot render the panel it refuses outright, because then nobody has seen the diff.",
       inputSchema: { proposalId: external_exports.string() },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      },
       _meta: { ui: { visibility: context.commitVisibility } }
     },
     async ({ proposalId }) => {
       const receipt = await commit(context, proposalId);
       resolveReview(proposalId, { kind: "committed", receipt });
       return {
-        content: [{ type: "text", text: describeReceipt(receipt) }],
+        content: [{ type: "text", text: describeCommit(receipt) }],
         structuredContent: receipt
       };
     }
@@ -29695,7 +30083,7 @@ function registerEditorCommit(server, context) {
 }
 
 // src/tools/editorDiscard.ts
-function registerEditorDiscard(server, _ctx) {
+function registerEditorDiscard(server, _context) {
   K3(
     server,
     "editor_discard",
@@ -29703,19 +30091,24 @@ function registerEditorDiscard(server, _ctx) {
       title: "Discard a proposal",
       description: "Called by the panel when the human closes without writing. Not for agent use.",
       inputSchema: { proposalId: external_exports.string(), reason: external_exports.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId, reason }) => {
       const proposal = getProposal(proposalId);
-      updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
-      resolveReview(proposalId, { kind: "discarded", ...reason ? { reason } : {} });
+      resolveProposal(proposalId, "discarded");
+      const delivered = resolveReview(proposalId, {
+        kind: "discarded",
+        ...reason ? { reason } : {}
+      });
       return {
         content: [
           {
             type: "text",
             text: `Discarded. Nothing was written to ${proposal.target.display}.` + (reason ? ` Reason: ${reason}` : "")
           }
-        ]
+        ],
+        structuredContent: { delivered }
       };
     }
   );
@@ -29731,13 +30124,19 @@ function registerEditorRequestChanges(server, _context) {
       description: "Called by the panel when the human comments instead of accepting. Not for agent use.",
       inputSchema: {
         proposalId: external_exports.string(),
-        message: external_exports.string().describe("The human's comments, already quoted against their lines.")
+        message: contentInput.describe("The human's comments, already quoted against their lines.")
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
       },
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId, message }) => {
       const proposal = getProposal(proposalId);
-      updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      resolveProposal(proposalId, "changes-requested");
       const waited = resolveReview(proposalId, { kind: "changes-requested", message });
       return {
         content: [
@@ -29767,6 +30166,7 @@ function registerEditorPending(server, { guard }) {
       inputSchema: {
         path: external_exports.string().optional().describe("Narrow to one file, from the arguments the panel was handed.")
       },
+      annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ path }) => {
@@ -29793,27 +30193,39 @@ function registerEditorPending(server, { guard }) {
 }
 
 // src/tools/readFile.ts
+var READ_BUDGET = 2e5;
 function registerReadFile(server, { guard }) {
   K3(
     server,
     "read_file",
     {
       title: "Read a file inside the roots",
-      description: "Read a file the editor is allowed to write, so a proposal can be based on what is actually there. Refuses anything outside the configured roots.",
-      inputSchema: { path: external_exports.string() },
+      description: "Reads a file the editor is allowed to write, so a proposal can be based on what is actually there. Refuses anything outside the configured roots, and truncates very large files.",
+      inputSchema: { path: pathInput },
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["model", "app"] } }
     },
     async ({ path }) => {
       const target = await guard.describe(path);
-      if (!target.absolute) {
-        return errorResult(`${path} is outside the roots this server will touch.`);
-      }
+      if (!target.absolute) return errorResult(explainRejection(target, guard.roots));
       if (!target.exists) {
         return { content: [{ type: "text", text: `${target.display} does not exist.` }] };
       }
       const body = await guard.read(target.absolute);
-      return { content: [{ type: "text", text: body }] };
+      if (body.length <= READ_BUDGET) {
+        return { content: [{ type: "text", text: body }] };
+      }
+      const head = body.slice(0, READ_BUDGET);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${head}
+
+\u2026 truncated. ${target.display} is ${countLines(body)} lines (${body.length} characters); the first ${READ_BUDGET} are shown. Open it in the editor to see the rest.`
+          }
+        ]
+      };
     }
   );
 }
@@ -29832,23 +30244,27 @@ function registerListRoots(server, context) {
       _meta: { ui: { visibility: ["model", "app"] } }
     },
     async () => {
-      const rendersPanel = context.canRenderPanel();
-      const verdict = rendersPanel ? "This host renders the panel: proposals open an editor and can be committed there." : context.terminalApproval ? "This host does NOT render the panel. --terminal-approval is on, so commits fall back to your client's own approve/deny prompt." : "This host does NOT render the panel, so no proposal can be committed. Nothing is broken \u2014 that is the designed refusal. Use a host with MCP Apps support, or start the server with --terminal-approval to use your client's prompt as the gate.";
+      const rendersPanel2 = context.canRenderPanel();
+      const verdict = rendersPanel2 ? "This host renders the panel: proposals open an editor and can be committed there." : context.terminalApproval ? "This host does NOT render the panel. --terminal-approval is on, so commits fall back to your client's own approve/deny prompt." : "This host does NOT render the panel, so no proposal can be committed. Nothing is broken \u2014 that is the designed refusal. Use a host with MCP Apps support, or start the server with --terminal-approval to use your client's prompt as the gate.";
       return {
         content: [
           {
             type: "text",
-            text: `Writable roots:
+            text: `mcp-interactive-editor ${SERVER_VERSION}
+
+Writable roots:
 ${guard.roots.map((r2) => `  ${r2}`).join("\n")}
 
 ${verdict}` + (guard.dryRun ? "\n\nDRY RUN: commits are simulated, nothing reaches disk." : "")
           }
         ],
         structuredContent: {
+          serverVersion: SERVER_VERSION,
           roots: guard.roots,
           dryRun: guard.dryRun,
-          rendersPanel,
-          terminalApproval: context.terminalApproval
+          rendersPanel: rendersPanel2,
+          terminalApproval: context.terminalApproval,
+          blockOnReview: context.blockOnReview
         }
       };
     }
@@ -29856,15 +30272,15 @@ ${verdict}` + (guard.dryRun ? "\n\nDRY RUN: commits are simulated, nothing reach
 }
 
 // src/tools/index.ts
-function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
+function registerTools(server, guard, options = {}) {
   const context = {
     guard,
-    commitVisibility: options.commitVisibility,
+    commitVisibility: options.commitVisibility ?? ["app"],
     terminalApproval: options.terminalApproval ?? false,
     reviewTimeoutMs: options.reviewTimeoutMs ?? REVIEW_TIMEOUT_MS,
     reviewGraceMs: options.reviewGraceMs ?? REVIEW_GRACE_MS,
     blockOnReview: options.blockOnReview ?? false,
-    canRenderPanel: () => hostRendersPanel(server)
+    canRenderPanel: () => rendersPanel(server.server.getClientCapabilities())
   };
   registerEditorView(server);
   registerProposeWrite(server, context);
@@ -29879,93 +30295,8 @@ function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
   registerReadFile(server, context);
   registerListRoots(server, context);
 }
-function hostRendersPanel(server) {
-  const ui = Y3(server.server.getClientCapabilities());
-  if (!ui) return false;
-  return ui.mimeTypes === void 0 || ui.mimeTypes.includes(p);
-}
 
 // src/server.ts
-function dryRunFromEnv() {
-  const raw = process.env.INTERACTIVE_EDITOR_DRY_RUN?.trim().toLowerCase();
-  return raw === "true" || raw === "1" || raw === "yes";
-}
-function parseArgs(argv) {
-  const cli = {
-    roots: [],
-    deny: [...DEFAULT_DENY],
-    dryRun: dryRunFromEnv(),
-    terminalApproval: false,
-    blockOnReview: false
-  };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === "--root-from-cwd") {
-      cli.roots.push(process.cwd());
-    } else if (arg === "--terminal-approval") {
-      cli.terminalApproval = true;
-    } else if (arg === "--review-timeout-ms") {
-      cli.reviewTimeoutMs = Number(argv[++i]);
-    } else if (arg === "--block-on-review") {
-      cli.blockOnReview = true;
-    } else if (arg === "--review-grace-ms") {
-      cli.reviewGraceMs = Number(argv[++i]);
-    } else if (arg === "--root") {
-      const value = argv[++i];
-      if (!value) throw new Error("--root needs a directory");
-      cli.roots.push(expandHome(value));
-    } else if (arg.startsWith("--root=")) {
-      cli.roots.push(expandHome(arg.slice("--root=".length)));
-    } else if (arg === "--deny") {
-      const value = argv[++i];
-      if (!value) throw new Error("--deny needs a pattern");
-      cli.deny.push(value);
-    } else if (arg.startsWith("--deny=")) {
-      cli.deny.push(arg.slice("--deny=".length));
-    } else if (arg === "--allow-everything-in-roots") {
-      cli.deny = [];
-    } else if (arg === "--dry-run") {
-      cli.dryRun = true;
-    } else if (arg === "--help" || arg === "-h") {
-      process.stdout.write(HELP);
-      process.exit(0);
-    } else if (!arg.startsWith("-")) {
-      cli.roots.push(expandHome(arg));
-    } else {
-      throw new Error(`Unknown flag ${arg}`);
-    }
-  }
-  return cli;
-}
-function expandHome(p2) {
-  return p2.startsWith("~") ? resolve4(homedir(), p2.slice(1).replace(/^[/\\]/, "")) : resolve4(p2);
-}
-var HELP = `mcp-interactive-editor \u2014 a live-edit review panel in front of every file write.
-
-Usage:
-  mcp-interactive-editor --root <dir> [--root <dir> ...] [options]
-
-Options:
-  --root <dir>                 A directory the editor may write inside. Required, repeatable.
-  --root-from-cwd              Add the working directory as a root. For hosts that
-                               launch the server inside the project (Claude Code).
-  --deny <substring>           Extra path substring to refuse. Repeatable.
-  --allow-everything-in-roots  Drop the built-in deny list (.git, node_modules, .env, keys...).
-  --dry-run                    Run the whole flow but never touch disk.
-  --terminal-approval          Expose the commit tool to the agent, for hosts that
-                               cannot render the editor. You get your client's
-                               approve/deny prompt instead of an editor. Weaker.
-  --block-on-review            Hold the opening call open until the human accepts or
-                               comments, so its result is the decision. Needs a host
-                               that dispatches the panel's calls while one is open;
-                               where it does not, the panel never loads. Off by default.
-  --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
-  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 30000.
-  -h, --help                   This.
-
-Every write goes through a View the human edits and approves. The agent can open
-the editor; only a click can walk through it.
-`;
 async function main() {
   let cli;
   try {
@@ -29975,6 +30306,10 @@ async function main() {
 
 ${HELP}`);
     process.exit(2);
+  }
+  if (cli.help) {
+    process.stdout.write(HELP);
+    process.exit(0);
   }
   if (cli.roots.length === 0) {
     process.stderr.write(`No --root given.

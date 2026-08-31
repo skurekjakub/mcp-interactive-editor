@@ -1,40 +1,65 @@
 import { useCallback, useRef } from "react";
-import type { DiffHunk } from "../../../shared/types.js";
+import type { DiffHunk, DiffLineKind } from "../../../shared/types.js";
 import { passageFromRows, type Passage, type SelectedRow } from "../../../shared/passages.js";
 import type { SelectionAnchor } from "../lib/anchor.js";
 
+/** Properties of the diff pane. */
 interface DiffPaneProps {
   hunks: DiffHunk[];
   isNewFile: boolean;
-  onSelect?: (passage: Passage | null, anchor: SelectionAnchor | null) => void;
+  onSelect?: (
+    passage: Passage | null,
+    anchor: SelectionAnchor | null,
+    fromPointer: boolean,
+  ) => void;
 }
 
 /**
- * The diff recomputes on every keystroke against what is on disk, which is the
- * point of the whole View: you are not reviewing the model's proposal, you are
- * reviewing the file you are about to end up with.
+ * Renders the diff against what is on disk.
+ *
+ * It recomputes on every keystroke, which is the point of the whole View: the
+ * subject of the review is not the model's proposal but the file the human is
+ * about to end up with.
+ *
+ * @param props - Component properties.
+ * @param props.hunks - The regions to show.
+ * @param props.isNewFile - Whether the target does not exist yet.
+ * @returns The rendered diff.
  */
 export function DiffPane({ hunks, isNewFile, onSelect }: DiffPaneProps) {
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const syncSelection = useCallback(() => {
-    if (!onSelect) return;
-    onSelect(passageFromRows(selectedRows(rootRef.current)), liveSelectionAnchor());
-  }, [onSelect]);
+  const syncSelection = useCallback(
+    (fromPointer: boolean) => {
+      if (!onSelect) return;
+      onSelect(passageFromRows(selectedRows(rootRef.current)), liveSelectionAnchor(), fromPointer);
+    },
+    [onSelect],
+  );
 
   if (hunks.length === 0) {
     return (
       // Handlers here too: an unchanged file still renders through this branch,
       // and a pane that silently ignores selections is worse than one that has
       // nothing to select.
-      <div className="diff-empty" ref={rootRef} onMouseUp={syncSelection} onKeyUp={syncSelection}>
+      <div
+        className="diff-empty"
+        ref={rootRef}
+        onMouseUp={() => syncSelection(true)}
+        onKeyUp={() => syncSelection(false)}
+      >
         {isNewFile ? "New file — everything here is an addition." : "Identical to what is on disk."}
       </div>
     );
   }
 
   return (
-    <div className="diff" ref={rootRef} onMouseUp={syncSelection} onKeyUp={syncSelection}>
+    <div
+      className="diff"
+      ref={rootRef}
+      onMouseUp={() => syncSelection(true)}
+      onKeyUp={() => syncSelection(false)}
+    >
       {hunks.map((hunk, index) => (
         <div className="hunk" key={`${hunk.oldStart}-${hunk.newStart}-${index}`}>
           <div className="hunk-head">@@ line {hunk.newStart} @@</div>
@@ -43,6 +68,7 @@ export function DiffPane({ hunks, isNewFile, onSelect }: DiffPaneProps) {
               className="dline"
               data-kind={line.kind}
               data-line={line.kind === "add" ? line.newLine : line.oldLine}
+              data-new-line={line.newLine ?? ""}
               data-text={line.text}
               key={lineIndex}
             >
@@ -60,9 +86,13 @@ export function DiffPane({ hunks, isNewFile, onSelect }: DiffPaneProps) {
 }
 
 /**
- * The only part of this pane that needs a browser: which rows does the live
- * selection touch? Each row was rendered carrying its own line number and text,
- * so nothing has to be parsed back out of the markup.
+ * Reports which diff rows the live selection touches.
+ *
+ * The only part of this pane that needs a browser. Each row carries its own line
+ * numbers and text as data attributes, so nothing is parsed back out of markup.
+ *
+ * @param root - The pane element to search within.
+ * @returns The touched rows, in document order.
  */
 function selectedRows(root: HTMLElement | null): SelectedRow[] {
   const selection = window.getSelection();
@@ -71,12 +101,20 @@ function selectedRows(root: HTMLElement | null): SelectedRow[] {
   const range = selection.getRangeAt(0);
   return Array.from(root.querySelectorAll<HTMLElement>(".dline"))
     .filter((row) => range.intersectsNode(row))
-    .map((row) => ({ line: Number(row.dataset.line ?? 0), text: row.dataset.text ?? "" }));
+    .map((row) => ({
+      line: Number(row.dataset.line ?? 0),
+      newLine: row.dataset.newLine ? Number(row.dataset.newLine) : null,
+      kind: (row.dataset.kind ?? "equal") as DiffLineKind,
+      text: row.dataset.text ?? "",
+    }));
 }
 
 /**
- * Where the selection is on screen, so a comment box can open beside it. This
- * pane is real DOM, so the range knows its own rectangle.
+ * Reports where the selection sits on screen.
+ *
+ * This pane is real DOM, so the range knows its own rectangle.
+ *
+ * @returns Viewport coordinates for the selection, or null when there is none.
  */
 function liveSelectionAnchor(): SelectionAnchor | null {
   const selection = window.getSelection();

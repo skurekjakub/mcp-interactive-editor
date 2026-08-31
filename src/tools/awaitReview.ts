@@ -1,20 +1,28 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ReviewOutcome } from "../../shared/types.js";
 import { getProposal } from "../proposals.js";
-import { awaitReview, resolveReview } from "../review.js";
+import { awaitReview, isAwaitingReview, resolveReview } from "../review.js";
 import type { ToolContext } from "./context.js";
-import { describeReceipt } from "./results.js";
+import { describeCommit } from "../../shared/receipt.js";
+
+/** How often to check whether a panel has attached, in milliseconds. */
+const ATTACH_POLL_MS = 25;
 
 /**
- * Hold the tool call open until the panel says what happened.
+ * Holds a tool call open until the panel reports what happened.
  *
- * Two things have to be true before waiting is safe. The host must be able to
- * render at all — otherwise there is nobody to wait for, and a terminal agent
- * should get the diff as text rather than a call that hangs. And a panel must
- * actually turn up: a host can advertise MCP Apps and still not mount this
- * particular View, and "declared support" is a promise, not an attachment. So
- * the wait proper starts only once the panel has attached, and until then there
- * is a short grace period after which the call returns as it always did.
+ * Two things must be true before waiting is safe. The host has to be able to
+ * render at all, or there is nobody to wait for and a terminal agent should get
+ * the diff as text rather than a call that hangs. And a panel has to actually
+ * turn up: a host can advertise MCP Apps and still not mount this particular
+ * View, so declared support is a promise rather than an attachment. The wait
+ * proper therefore starts only once the panel has attached, with a short grace
+ * period before the call gives up and returns the diff.
+ *
+ * @param context - Whether to block, and how long to wait.
+ * @param proposalId - The proposal whose review to wait on.
+ * @param opened - The result to fall back to when nobody answers.
+ * @returns The outcome of the review, or the opening result.
  */
 export async function waitForReview(
   context: ToolContext,
@@ -30,7 +38,13 @@ export async function waitForReview(
   // immediately cannot slip through the gap.
   const settled = awaitReview(proposalId, context.reviewTimeoutMs);
 
-  if (!(await attachedWithin(proposalId, context.reviewGraceMs))) {
+  const attached = await attachedWithin(proposalId, context.reviewGraceMs);
+
+  // Only declare nobody home while the review is genuinely still outstanding. A
+  // human who discards before the panel finishes attaching has already answered,
+  // and overwriting that with "no editor attached" would burn the whole grace
+  // period to report the wrong outcome.
+  if (!attached && isAwaitingReview(proposalId)) {
     resolveReview(proposalId, {
       kind: "unanswered",
       why: "This host advertises MCP Apps but no editor attached to the proposal.",
@@ -40,27 +54,49 @@ export async function waitForReview(
   return describeOutcome(await settled, opened);
 }
 
+/**
+ * Waits for a panel to attach to a proposal.
+ *
+ * Returns early once the review has resolved by any route, so an answer that
+ * arrives before the attachment does not sit out the remaining grace period.
+ *
+ * @param proposalId - The proposal to watch.
+ * @param graceMs - How long to keep checking.
+ * @returns True when a panel attached within the grace period.
+ */
 async function attachedWithin(proposalId: string, graceMs: number): Promise<boolean> {
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
     if (getProposal(proposalId).attached) return true;
-    await new Promise((r) => setTimeout(r, 25));
+    if (!isAwaitingReview(proposalId)) return false;
+    await new Promise((r) => setTimeout(r, ATTACH_POLL_MS));
   }
   return getProposal(proposalId).attached;
 }
 
 /**
- * What the agent is told, and it is deliberately blunt about the difference
- * between "done" and "do it again". A rejected draft that reads like a success
- * is how an agent moves on from work that never landed.
+ * Renders a review outcome for the agent.
+ *
+ * Deliberately blunt about the difference between "done" and "do it again": a
+ * rejected draft that reads like a success is how an agent moves on from work
+ * that never landed.
+ *
+ * @param outcome - How the review ended.
+ * @param opened - The opening result, returned when nobody answered.
+ * @returns What the agent is told.
  */
-export function describeOutcome(outcome: ReviewOutcome, opened: CallToolResult): CallToolResult {
+function describeOutcome(outcome: ReviewOutcome, opened: CallToolResult): CallToolResult {
   switch (outcome.kind) {
-    case "committed":
+    case "committed": {
+      // The body has already been through the panel. Sending it back through the
+      // opener would put the whole file into the model's context, which is the
+      // cost the claim-ticket handle exists to avoid.
+      const { content: _body, ...receipt } = outcome.receipt;
       return {
-        content: [{ type: "text", text: describeReceipt(outcome.receipt) }],
-        structuredContent: outcome.receipt as unknown as Record<string, unknown>,
+        content: [{ type: "text", text: describeCommit(outcome.receipt) }],
+        structuredContent: receipt,
       };
+    }
 
     case "changes-requested":
       return {

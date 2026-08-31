@@ -5,8 +5,14 @@ import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import type { ToolContext } from "./context.js";
 import { commit } from "./commit.js";
 import { resolveReview } from "../review.js";
-import { describeReceipt } from "./results.js";
+import { describeCommit } from "../../shared/receipt.js";
 
+/**
+ * Registers the tool that writes an approved proposal to disk.
+ *
+ * @param server - The MCP server to register against.
+ * @param context - Guard, visibility settings and the host capability probe.
+ */
 export function registerEditorCommit(server: McpServer, context: ToolContext): void {
   registerAppTool(
     server,
@@ -18,6 +24,12 @@ export function registerEditorCommit(server: McpServer, context: ToolContext): v
         "on an explicit click. Not for agent use — and in a host that cannot render the panel it " +
         "refuses outright, because then nobody has seen the diff.",
       inputSchema: { proposalId: z.string() },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
       _meta: { ui: { visibility: context.commitVisibility } },
     },
     async ({ proposalId }) => {
@@ -25,8 +37,8 @@ export function registerEditorCommit(server: McpServer, context: ToolContext): v
       // Ends the wait the opening tool call is sitting in.
       resolveReview(proposalId, { kind: "committed", receipt });
       return {
-        content: [{ type: "text", text: describeReceipt(receipt) }],
-        structuredContent: receipt as unknown as Record<string, unknown>,
+        content: [{ type: "text", text: describeCommit(receipt) }],
+        structuredContent: receipt,
       } satisfies CallToolResult;
     },
   );

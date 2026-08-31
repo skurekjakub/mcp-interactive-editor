@@ -26,9 +26,13 @@ describe("placePopover", () => {
     expect(at.left + BOX.width).toBeLessThanOrEqual(VIEWPORT.width);
   });
 
-  it("never runs off the left edge", () => {
+  it("keeps a gap at the left edge rather than touching it", () => {
+    // A box flush against the edge reads as clipped, and the button inside it
+    // lands under the panel border. Asserting only that it is not negative is
+    // satisfied by exactly the placement being guarded against.
     const at = placePopover({ top: 300, bottom: 320, left: -50 }, BOX, VIEWPORT);
-    expect(at.left).toBeGreaterThanOrEqual(0);
+
+    expect(at.left).toBe(ANCHOR_GAP);
   });
 
   it("stays on screen when flipped below near the bottom", () => {

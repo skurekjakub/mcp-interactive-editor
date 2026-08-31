@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { basename } from "../lib/labels.js";
 import {
   isAnswered,
   rangeOf,
@@ -9,6 +10,7 @@ import {
 
 const MAX_NOTE_HEIGHT = 120;
 
+/** Properties of the docked highlight tray. */
 interface SelectionBarProps {
   /**
    * The live selection, not yet pinned.
@@ -20,27 +22,35 @@ interface SelectionBarProps {
   pending: Passage | null;
   /** Regions already pinned. Shown in reading order, not the order they were clicked. */
   passages: Passage[];
+  /** Everything that would actually be sent, including an unpinned live selection. */
+  outgoing: Passage[];
   path: string;
   sending: boolean;
   onAttach: (passage: Passage) => void;
   onAnnotate: (id: string, note: string) => void;
   onRemove: (id: string) => void;
-  onSend: (note: string) => void;
+  onSend: (note: string) => Promise<void>;
   onDismiss: () => void;
 }
 
 /**
- * Highlights on their way to the chat, and what is being asked about each one.
+ * Renders the highlights on their way to the chat and what is asked about each.
  *
- * It docks to the bottom of the panel and stays there while you work: every
- * highlight is a row with its own comment box, and sending waits until none of
- * them are empty. A pile of quotes with one paragraph underneath makes the
- * reader guess which remark belongs to which region, and a tray that vanishes
- * makes you re-select everything to add the one you forgot.
+ * The tray docks to the bottom of the panel and stays there while the human
+ * works: every highlight is a row with its own comment box, and sending waits
+ * until none of them are empty. A pile of quotes with one paragraph underneath
+ * makes the reader guess which remark belongs to which region, and a tray that
+ * vanishes forces a re-selection to add the one that was forgotten.
+ *
+ * @param props - Component properties.
+ * @param props.outgoing - Everything that would be sent, live selection included.
+ * @param props.sending - Whether a send is in flight.
+ * @returns The docked tray.
  */
 export function SelectionBar({
   pending,
   passages,
+  outgoing,
   path,
   sending,
   onAttach,
@@ -52,14 +62,19 @@ export function SelectionBar({
   const [note, setNote] = useState("");
 
   const ordered = sortPassages(passages);
-  const waiting = unanswered(passages);
+  // Counted over what will actually be sent, so the "still needs a comment"
+  // warning cannot disagree with what the send does.
+  const waiting = unanswered(outgoing);
   const alreadyAttached = pending !== null && passages.some((p) => p.id === pending.id);
-  const nothingPinned = passages.length === 0;
-  const blocked = nothingPinned || waiting.length > 0;
+  const nothingSelected = outgoing.length === 0;
+  const blocked = nothingSelected || waiting.length > 0;
 
-  const submit = () => {
+  const submit = async () => {
     if (sending || blocked) return;
-    onSend(note.trim());
+    const outbound = note.trim();
+    // Clear only once it has gone. A refused send that has already emptied the
+    // box loses a typed paragraph with no way to recover it.
+    await onSend(outbound);
     setNote("");
   };
 
@@ -67,9 +82,9 @@ export function SelectionBar({
     <div className="selection" data-blocked={String(blocked)}>
       <div className="selection-head">
         <span className="selection-count">
-          {passages.length === 0
+          {outgoing.length === 0
             ? "Highlight something in either pane"
-            : `${passages.length} highlighted in ${basename(path)}`}
+            : `${outgoing.length} highlighted in ${basename(path)}`}
         </span>
         {waiting.length > 0 ? (
           <span className="selection-waiting">
@@ -111,7 +126,7 @@ export function SelectionBar({
         className="selection-ask"
         onSubmit={(event) => {
           event.preventDefault();
-          submit();
+          void submit();
         }}
       >
         <textarea
@@ -128,7 +143,7 @@ export function SelectionBar({
           type="submit"
           disabled={sending || blocked}
           title={
-            nothingPinned
+            nothingSelected
               ? "Add at least one highlight first"
               : waiting.length > 0
                 ? "Every highlight needs a comment before this can go"
@@ -145,6 +160,7 @@ export function SelectionBar({
   );
 }
 
+/** Properties of one highlight row. */
 interface PassageRowProps {
   passage: Passage;
   disabled: boolean;
@@ -153,9 +169,14 @@ interface PassageRowProps {
 }
 
 /**
- * One highlight and the comment attached to it. Enter is a newline here rather
- * than a send: this is the field you are composing in, and there is a button for
- * the other thing.
+ * Renders one highlight and the comment attached to it.
+ *
+ * Enter is a newline here rather than a send: this is the field being composed
+ * in, and there is a button for the other thing.
+ *
+ * @param props - Component properties.
+ * @param props.passage - The highlighted region.
+ * @returns The row and its comment box.
  */
 function PassageRow({ passage, disabled, onAnnotate, onRemove }: PassageRowProps) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -197,13 +218,14 @@ function PassageRow({ passage, disabled, onAnnotate, onRemove }: PassageRowProps
   );
 }
 
-/** One line of preview. The full passage is what gets sent, not this. */
+/**
+ * Shortens a passage to one line of preview.
+ *
+ * @param text - The full passage.
+ * @returns Its first line, elided.
+ */
 function excerpt(text: string): string {
   const firstLine = text.split("\n")[0]?.trim() ?? "";
   const trimmed = firstLine.length > 96 ? `${firstLine.slice(0, 96)}…` : firstLine;
   return text.includes("\n") ? `${trimmed} …` : trimmed;
-}
-
-function basename(path: string): string {
-  return path.split("/").pop() ?? path;
 }

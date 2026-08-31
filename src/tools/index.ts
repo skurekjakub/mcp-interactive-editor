@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { RESOURCE_MIME_TYPE, getUiCapability } from "@modelcontextprotocol/ext-apps/server";
 import type { FsGuard } from "../fsGuard.js";
+import { rendersPanel } from "../hostCapability.js";
 import { REVIEW_GRACE_MS, REVIEW_TIMEOUT_MS } from "../review.js";
 import type { ToolContext } from "./context.js";
 import { registerEditorView } from "./view.js";
@@ -16,58 +16,36 @@ import { registerEditorPending } from "./editorPending.js";
 import { registerReadFile } from "./readFile.js";
 import { registerListRoots } from "./listRoots.js";
 
-export type { ToolContext } from "./context.js";
-export { VIEW_URI } from "./context.js";
+/**
+ * Settings that decide who may call the writing tools.
+ *
+ * The `model`/`app` visibility split is the entire security model. Model-visible
+ * tools never touch disk; they open a review panel and read inside the roots.
+ * App-only tools are the ones that write, and the MCP Apps spec requires the
+ * host to keep them out of the agent's tool list and to reject any call the
+ * agent makes for them, so the only caller that exists is the View.
+ */
+export type ToolOptions = Partial<Omit<ToolContext, "guard" | "canRenderPanel">>;
 
 /**
- * Two sets of tools, and the split is the entire security model.
+ * Registers every tool, on the correct side of the visibility split.
  *
- * `visibility: ["model"]` tools can be called by the agent. None of them touch
- * disk — the most they do is open a review panel and read files inside the roots.
+ * The grouping below is the only place that records which side a tool falls on,
+ * so adding a tool means a new module and a new line in the right group.
  *
- * `visibility: ["app"]` tools are the ones that write, and the host is required
- * by the MCP Apps spec to keep them out of the agent's tool list entirely and to
- * reject any call the agent makes for them. So the model cannot commit a write
- * even if it decides it wants to: the only caller that exists is the View, and
- * the View only calls on a click.
- *
- * One module per tool, and the grouping below is the only place that says which
- * side of the line a tool falls on. Adding a tool is a new file and a new line
- * in the right group here.
+ * @param server - The MCP server to register against.
+ * @param guard - Filesystem guard enforcing root containment for every path.
+ * @param options - Who may commit, and how long opening calls wait.
  */
-export interface ToolOptions {
-  /**
-   * Who may call `editor_commit`. Defaults to app-only, which is the whole point.
-   * `--terminal-approval` widens it for hosts that cannot render the editor, and
-   * trades the editable review for the client's own approve/deny prompt.
-   */
-  commitVisibility: Array<"model" | "app">;
-  /**
-   * True when `--terminal-approval` was passed. Without it, a host that cannot
-   * render the panel is refused a commit outright rather than trusted.
-   */
-  terminalApproval?: boolean;
-  /** How long an opening call waits for the human. Defaults to REVIEW_TIMEOUT_MS. */
-  reviewTimeoutMs?: number;
-  /** How long to wait for a panel to attach. Defaults to REVIEW_GRACE_MS. */
-  reviewGraceMs?: number;
-  /** Hold opening calls open until the human decides. Off unless asked for. */
-  blockOnReview?: boolean;
-}
-
-export function registerTools(
-  server: McpServer,
-  guard: FsGuard,
-  options: ToolOptions = { commitVisibility: ["app"] },
-): void {
+export function registerTools(server: McpServer, guard: FsGuard, options: ToolOptions = {}): void {
   const context: ToolContext = {
     guard,
-    commitVisibility: options.commitVisibility,
+    commitVisibility: options.commitVisibility ?? ["app"],
     terminalApproval: options.terminalApproval ?? false,
     reviewTimeoutMs: options.reviewTimeoutMs ?? REVIEW_TIMEOUT_MS,
     reviewGraceMs: options.reviewGraceMs ?? REVIEW_GRACE_MS,
     blockOnReview: options.blockOnReview ?? false,
-    canRenderPanel: () => hostRendersPanel(server),
+    canRenderPanel: () => rendersPanel(server.server.getClientCapabilities()),
   };
 
   registerEditorView(server);
@@ -88,19 +66,4 @@ export function registerTools(
   // Read-only helpers, safe for both callers.
   registerReadFile(server, context);
   registerListRoots(server, context);
-}
-
-/**
- * Does the connected host actually render MCP Apps?
- *
- * `visibility: ["app"]` is a request to the host, not a guarantee — a host that
- * does not implement MCP Apps hands every tool to the agent, `editor_attach`
- * included, and then the agent can mark its own proposal as reviewed. The
- * client's declared capabilities are the one part of this the agent does not
- * get to author, so that is what the commit path asks.
- */
-function hostRendersPanel(server: McpServer): boolean {
-  const ui = getUiCapability(server.server.getClientCapabilities());
-  if (!ui) return false;
-  return ui.mimeTypes === undefined || ui.mimeTypes.includes(RESOURCE_MIME_TYPE);
 }

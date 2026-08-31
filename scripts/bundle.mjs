@@ -13,7 +13,7 @@
  *     ui/index.html     <- the editor, already a single inlined file
  */
 import { build } from "esbuild";
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +21,17 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(root, "bundle");
 
 const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+
+/*
+ * Check the inputs before destroying the output. `bundle/` is committed and is
+ * what the plugin serves, so failing after the delete leaves the repository
+ * holding an artifact with no manifest and no panel — worse than not running at
+ * all, and indistinguishable from a successful build until someone installs it.
+ */
+const panel = resolve(root, "dist/ui/index.html");
+await access(panel).catch(() => {
+  throw new Error("dist/ui/index.html is missing. Run `npm run build` first.");
+});
 
 await rm(out, { recursive: true, force: true });
 await mkdir(resolve(out, "server"), { recursive: true });
@@ -44,9 +55,7 @@ await build({
   },
 });
 
-await copyFile(resolve(root, "dist/ui/index.html"), resolve(out, "ui/index.html")).catch(() => {
-  throw new Error("dist/ui/index.html is missing. Run `npm run build` first.");
-});
+await copyFile(panel, resolve(out, "ui/index.html"));
 
 const manifest = {
   manifest_version: "0.3",

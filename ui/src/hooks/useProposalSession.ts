@@ -1,23 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp, useHostStyleVariables } from "@modelcontextprotocol/ext-apps/react";
 import type { EditorState, ProposalHandle } from "../../../shared/types.js";
-import { IS_PREVIEW, hostBridge, previewBridge, previewState, type Bridge } from "../bridge.js";
-import { messageOf, refusalIn, textOf } from "../lib/results.js";
+import { isPreview, hostBridge, previewBridge, previewState, type Bridge } from "../bridge.js";
+import { call } from "../lib/call.js";
+import { messageOf, textOf } from "../lib/results.js";
 import { PANEL_VERSION } from "../lib/version.js";
 
+/** How long to coalesce keystrokes before pushing them to the server. */
 const PUSH_DEBOUNCE_MS = 500;
 
 /** How long to keep asking for the proposal. Must outlast the server's grace. */
 const CLAIM_TIMEOUT_MS = 30_000;
+
+/** Gap between claim attempts, in milliseconds. */
 const CLAIM_RETRY_MS = 100;
+
+/** How many times to retry an attach that failed before giving up. */
+const ATTACH_ATTEMPTS = 3;
 
 /** The openers send a handle, the panel's own calls send full state. Accept either. */
 type OpeningPayload = Partial<ProposalHandle> & Partial<EditorState>;
 
+/** Everything the panel knows about the proposal it is showing. */
 export interface ProposalSession {
   /** Null until the attach round trip lands. */
   state: EditorState | null;
-  /** What the opening tool sent: enough to name the file while we wait. */
+  /** What the opening tool sent: enough to name the file while waiting. */
   handle: ProposalHandle | null;
   bridge: Bridge | null;
   content: string;
@@ -27,7 +35,7 @@ export interface ProposalSession {
   /** The host connection failed; nothing else will work. */
   hostError: Error | null;
   /** Where the panel has got to, so a stall says which step it stalled on. */
-  phase: "connecting" | "claiming" | "attaching" | "ready";
+  phase: "connecting" | "claiming" | "attaching" | "ready" | "cancelled";
   /** How the host is showing this panel right now. */
   displayMode: "inline" | "fullscreen" | "pip";
   /** Whether asking for fullscreen is worth offering at all. */
@@ -39,15 +47,16 @@ export interface ProposalSession {
 }
 
 /**
- * Getting a proposal and keeping the server's copy of it current.
+ * Gets a proposal and keeps the server's copy of it current.
  *
  * The opening tool hands the panel a claim ticket rather than the proposal —
- * `structuredContent` goes to the model as well as to us, and the file has no
- * business being in its context three times over. The bytes arrive on attach,
- * which the panel has to call anyway because attaching is what unlocks the
- * commit tool server-side.
+ * `structuredContent` goes to the model as well, and the file has no business
+ * being in its context three times over. The bytes arrive on attach, which the
+ * panel has to call anyway because attaching is what unlocks the commit tool
+ * server-side.
  *
- * @param paused stop syncing edits upward — set once a commit has landed.
+ * @param paused - Stop syncing edits upward; set once the proposal has resolved.
+ * @returns The session state and the setters the panel drives it with.
  */
 export function useProposalSession(paused: boolean): ProposalSession {
   const [state, setState] = useState<EditorState | null>(null);
@@ -55,9 +64,18 @@ export function useProposalSession(paused: boolean): ProposalSession {
   const [content, setContent] = useState("");
   const [ack, setAck] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  /** The path the opening tool was called with, from the arguments the host hands us. */
+  /** The path the opening tool was called with, from the arguments the host hands over. */
   const [openedPath, setOpenedPath] = useState<string | undefined>(undefined);
   const [phase, setPhase] = useState<ProposalSession["phase"]>("connecting");
+  /**
+   * Set once, by the host, when the call this panel belongs to is cancelled.
+   *
+   * Separate from `phase` because the claim and attach effects write `phase`
+   * themselves. Depending on a value the effect body sets makes the effect
+   * re-run and cancel its own in-flight call, so every mount asks twice — two
+   * re-reads of the file, and two attaches whose stored baselines can differ.
+   */
+  const [hostCancelled, setHostCancelled] = useState(false);
   const [displayMode, setDisplayMode] = useState<ProposalSession["displayMode"]>("inline");
   const [availableModes, setAvailableModes] = useState<string[]>([]);
 
@@ -85,22 +103,37 @@ export function useProposalSession(paused: boolean): ProposalSession {
         if (ctx?.displayMode) setDisplayMode(ctx.displayMode);
         setAvailableModes(ctx?.availableDisplayModes ?? []);
       };
-      instance.onhostcontextchanged = readContext;
 
-      // Arguments arrive before any result does — and now the result does not
-      // arrive at all until the human has decided, because the opening call is
-      // waiting on this panel. The path is how we find the proposal we are for.
-      instance.ontoolinput = (params) => {
+      /*
+       * addEventListener rather than the `on*` setters, which the SDK marks
+       * deprecated. The setters are also a single slot: any other assignment
+       * silently replaces the handler already installed.
+       */
+      instance.addEventListener("hostcontextchanged", readContext);
+
+      // Arguments arrive before any result does, and under --block-on-review the
+      // result does not arrive until the human has decided. The path is how this
+      // panel finds the proposal it exists for.
+      instance.addEventListener("toolinput", (params) => {
         const path = (params.arguments as { path?: unknown } | undefined)?.path;
         if (typeof path === "string") setOpenedPath(path);
-      };
+      });
 
-      instance.ontoolresult = (result) => {
-        const payload = result.structuredContent as unknown as OpeningPayload | undefined;
+      instance.addEventListener("toolresult", (params) => {
+        const payload = params.structuredContent as unknown as OpeningPayload | undefined;
         if (!payload) return;
         if (payload.proposal) adopt(payload as EditorState);
         else if (payload.proposalId) setHandle(payload as ProposalHandle);
-      };
+      });
+
+      // A stopped agent leaves the panel offering an editor for a call nobody is
+      // waiting on, and a commit through it would land with no conversation to
+      // report back to.
+      instance.addEventListener("toolcancelled", () => {
+        setHostCancelled(true);
+        setPhase("cancelled");
+        setFailure("The call this panel was opened for was cancelled. Nothing will be written.");
+      });
     },
   });
 
@@ -126,60 +159,62 @@ export function useProposalSession(paused: boolean): ProposalSession {
   }, [app, displayMode]);
 
   const bridge: Bridge | null = useMemo(() => {
-    if (IS_PREVIEW) return previewBridge();
+    if (isPreview()) return previewBridge();
     return app ? hostBridge(app) : null;
   }, [app]);
 
   // Preview runs the View in a plain browser tab with fixture data, so the
   // layout can be worked on without a host in the loop.
   useEffect(() => {
-    if (IS_PREVIEW) adopt(previewState());
+    if (isPreview()) adopt(previewState());
   }, [adopt]);
 
   const proposalId = state?.proposal.proposalId ?? handle?.proposalId;
-  const ready = IS_PREVIEW || isConnected;
+  const ready = isPreview() || isConnected;
 
   /*
    * Claim the proposal this panel was opened for.
    *
-   * The opening call used to return a handle immediately; now it waits for this
-   * panel, so the result that carried the id only arrives once the human has
-   * decided — long after we need it. The host mounts the View on the *call*, so
-   * we are alive first and trade the arguments for the proposal instead.
+   * The host mounts the View on the tool call, so the panel is alive before any
+   * result carrying a proposal id exists. It trades the call's arguments for the
+   * proposal instead.
    *
-   * Retried, because we are racing the call that created us: the View can mount
+   * Retried, because this races the call that created it: the View can mount
    * before the server has finished making the proposal.
    */
   useEffect(() => {
-    if (!bridge || !ready || state) return;
+    if (!bridge || !ready || state || hostCancelled) return;
     let cancelled = false;
     setPhase("claiming");
+    // A failure from an earlier attempt describes a state that has since passed;
+    // leaving it pinned to the bottom of a working panel reports a broken one.
+    setFailure(null);
 
     void (async () => {
       const deadline = Date.now() + CLAIM_TIMEOUT_MS;
       let lastAnswer = "";
       while (!cancelled && Date.now() < deadline) {
         try {
-          const result = await bridge.callTool(
+          const claim = await call(
+            bridge,
             "editor_pending",
             openedPath ? { path: openedPath } : {},
           );
-          // A refused call is not an empty one. Retrying it thirty seconds and
-          // then blaming an empty answer hides whatever the host actually said.
-          const refused = refusalIn(result);
-          if (refused) {
-            if (!cancelled) setFailure(refused);
+          // A refused call is not an empty one. Retrying for thirty seconds and
+          // then blaming an empty answer hides what the host actually said.
+          if (claim.refusal) {
+            if (!cancelled) setFailure(claim.refusal);
             return;
           }
 
-          const next = result.structuredContent as unknown as EditorState | undefined;
+          const next = claim.result.structuredContent as unknown as EditorState | undefined;
           if (next?.proposal) {
             if (!cancelled) adopt(next);
             return;
           }
           // Keep the server's own account of what it has open, so the timeout
           // below can say something better than "empty".
-          lastAnswer = textOf(result);
+          lastAnswer = textOf(claim.result);
         } catch (cause) {
           if (!cancelled) setFailure(messageOf(cause));
           return;
@@ -198,45 +233,57 @@ export function useProposalSession(paused: boolean): ProposalSession {
     return () => {
       cancelled = true;
     };
-  }, [bridge, ready, state, openedPath, adopt]);
+  }, [bridge, ready, state, openedPath, adopt, hostCancelled]);
 
-  // Attaching is what unlocks the commit tool server-side. Until this lands,
-  // nothing can write — including from a host that ignores tool visibility. It
-  // is also how the panel gets the file the opening result left out.
+  // Attaching is what unlocks the commit tool server-side. Until it lands
+  // nothing can write, including from a host that ignores tool visibility. It is
+  // also how the panel gets the file the opening result left out.
   useEffect(() => {
-    if (!bridge || !ready || !proposalId) return;
+    if (!bridge || !ready || !proposalId || hostCancelled) return;
     let cancelled = false;
     setPhase("attaching");
-    void bridge
-      .callTool("editor_attach", { proposalId })
-      .then((result) => {
-        if (cancelled) return;
+    setFailure(null);
 
-        const refused = refusalIn(result);
-        if (refused) {
-          setFailure(refused);
-          return;
+    void (async () => {
+      for (let attempt = 1; attempt <= ATTACH_ATTEMPTS && !cancelled; attempt += 1) {
+        try {
+          const attached = await call(bridge, "editor_attach", { proposalId });
+          if (cancelled) return;
+
+          if (attached.refusal) {
+            if (attempt === ATTACH_ATTEMPTS) setFailure(attached.refusal);
+            continue;
+          }
+
+          const next = attached.result.structuredContent as unknown as EditorState | undefined;
+          if (next?.proposal) {
+            adopt(next);
+            setPhase("ready");
+            return;
+          }
+          if (attempt === ATTACH_ATTEMPTS) {
+            setFailure("The server attached to the proposal but sent nothing back to show.");
+          }
+        } catch (cause) {
+          if (cancelled) return;
+          if (attempt === ATTACH_ATTEMPTS) setFailure(messageOf(cause));
         }
+        await new Promise((r) => setTimeout(r, CLAIM_RETRY_MS));
+      }
+    })();
 
-        const next = result.structuredContent as unknown as EditorState | undefined;
-        adopt(next);
-        if (next?.proposal) setPhase("ready");
-        else setFailure("The server attached to the proposal but sent nothing back to show.");
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setFailure(messageOf(cause));
-      });
     return () => {
       cancelled = true;
     };
-  }, [bridge, ready, proposalId, adopt]);
+  }, [bridge, ready, proposalId, adopt, hostCancelled]);
 
   // Keep the server's copy current, but not on every character.
   const pushTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (!bridge || !state || paused) return;
-    if (content === state.proposal.content && ack === state.proposal.destructiveAcknowledged)
+    if (content === state.proposal.content && ack === state.proposal.destructiveAcknowledged) {
       return;
+    }
 
     window.clearTimeout(pushTimer.current);
     pushTimer.current = window.setTimeout(() => {
@@ -248,7 +295,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
         })
         .catch(() => {
           // A failed sync is not worth interrupting an edit for. The commit
-          // sends the final content anyway, and the server rechecks everything.
+          // flushes the final content and checks that flush before writing.
         });
     }, PUSH_DEBOUNCE_MS);
 

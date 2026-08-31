@@ -1,9 +1,21 @@
 import type { App } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult, ContentBlock } from "@modelcontextprotocol/sdk/types.js";
 import type { EditorState, Proposal } from "../../shared/types.js";
-import { diffLines } from "../../shared/diff.js";
-import { lintProposal } from "../../shared/lint.js";
+import { countLines } from "../../shared/diff.js";
+import { composeState, type StateContext } from "../../shared/state.js";
 import { PANEL_VERSION } from "./lib/version.js";
+
+/**
+ * The world the preview pretends to run in.
+ *
+ * Dry run is not negotiable here: the preview has no server behind it, and a
+ * fixture that reported otherwise would be teaching the wrong reflex.
+ */
+const PREVIEW_CONTEXT: StateContext = {
+  roots: ["/preview"],
+  dryRun: true,
+  serverVersion: PANEL_VERSION,
+};
 
 /**
  * Everything the View needs from the outside world, behind one small interface.
@@ -21,21 +33,33 @@ export interface Bridge {
   sendMessage(text: string): Promise<unknown>;
 }
 
-/** The View is always framed by a real host. A top-level window means preview. */
-export const IS_PREVIEW = typeof window !== "undefined" && window.parent === window;
+/**
+ * Reports whether the panel is running outside a host.
+ *
+ * A function rather than a module constant so it is evaluated per call. Frozen
+ * at import time it is unfaithful under a test runner, where the panel is always
+ * top-level: the entire host path — claiming, retrying, refusals, attach —
+ * becomes unreachable, and that is the code every shipped regression came from.
+ *
+ * @returns True when no host frames this View.
+ */
+export function isPreview(): boolean {
+  return typeof window !== "undefined" && window.parent === window;
+}
 
+/**
+ * Wraps a connected host as a bridge.
+ *
+ * @param app - The connected MCP App instance.
+ * @returns A bridge that forwards to the host.
+ */
 export function hostBridge(app: App): Bridge {
   return {
-    callTool: (name, args) =>
-      app.callServerTool({ name, arguments: args }) as Promise<CallToolResult>,
+    callTool: (name, args) => app.callServerTool({ name, arguments: args }),
     updateModelContext: (params) => app.updateModelContext(params),
     sendMessage: (text) => app.sendMessage({ role: "user", content: [{ type: "text", text }] }),
   };
 }
-
-// ---------------------------------------------------------------------------
-// Preview
-// ---------------------------------------------------------------------------
 
 const PREVIEW_BASELINE = `# Deploy pipeline
 name: deploy
@@ -93,6 +117,11 @@ jobs:
       - run: npm run build
       - run: ./scripts/deploy.sh`;
 
+/**
+ * Builds the fixture proposal the preview runs on.
+ *
+ * @returns A proposal against an imaginary workflow file.
+ */
 function previewProposal(): Proposal {
   return {
     proposalId: "preview",
@@ -105,9 +134,9 @@ function previewProposal(): Proposal {
       exists: true,
       onDisk: {
         bytes: PREVIEW_BASELINE.length,
-        lines: PREVIEW_BASELINE.split("\n").length,
+        lines: countLines(PREVIEW_BASELINE),
         sha256: "preview",
-        mtimeMs: 0,
+        mode: 0o644,
       },
     },
     content: PREVIEW_PROPOSED,
@@ -116,29 +145,22 @@ function previewProposal(): Proposal {
     rationale: "Collapse the three jobs into one so deploys stop waiting on the artifact upload.",
     attached: false,
     destructiveAcknowledged: false,
+    createdAt: 0,
   };
 }
 
 /**
- * An in-memory server. It runs the same lint and diff modules the real one does,
- * so what you see in preview is what the editor actually does — minus the part
- * where it touches your disk.
+ * Builds an in-memory server for the preview.
+ *
+ * It runs the same lint and diff modules the real one does, so the preview
+ * behaves as the editor does — minus the part that touches disk.
+ *
+ * @returns A bridge backed by fixture state.
  */
 export function previewBridge(): Bridge {
   let proposal = previewProposal();
 
-  const state = (): EditorState => {
-    const after = proposal.mode === "delete" ? "" : proposal.content;
-    const { hunks, stats } = diffLines(proposal.baseline, after);
-    return {
-      proposal,
-      findings: lintProposal(proposal, stats),
-      diff: hunks,
-      roots: ["/preview"],
-      dryRun: true,
-      serverVersion: PANEL_VERSION,
-    };
-  };
+  const state = (): EditorState => composeState(proposal, PREVIEW_CONTEXT);
 
   const ok = (structuredContent: unknown, text: string): CallToolResult => ({
     content: [{ type: "text", text }],
@@ -182,7 +204,7 @@ export function previewBridge(): Bridge {
               display: proposal.target.display,
               mode: proposal.mode,
               bytes: proposal.content.length,
-              lines: proposal.content.split("\n").length,
+              lines: countLines(proposal.content),
               sha256: "preview0000000000000000000000000000000000000000000000000000000000",
               dryRun: true,
               editedByHuman: proposal.content !== proposal.originalContent,
@@ -205,15 +227,11 @@ export function previewBridge(): Bridge {
   };
 }
 
+/**
+ * Builds the editor state the preview opens on.
+ *
+ * @returns Fixture state, complete with a real diff and real findings.
+ */
 export function previewState(): EditorState {
-  const proposal = previewProposal();
-  const { hunks, stats } = diffLines(proposal.baseline, proposal.content);
-  return {
-    proposal,
-    findings: lintProposal(proposal, stats),
-    diff: hunks,
-    roots: ["/preview"],
-    dryRun: true,
-    serverVersion: PANEL_VERSION,
-  };
+  return composeState(previewProposal(), PREVIEW_CONTEXT);
 }

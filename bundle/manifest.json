@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "mcp-interactive-editor",
   "display_name": "Interactive Editor",
-  "version": "0.5.2",
+  "version": "0.6.1",
   "description": "An MCP App that opens an interactive editor for every file write a model proposes. You edit it by hand, and nothing reaches disk until you say so.",
   "long_description": "Claude proposes a file write. A panel opens with the proposed content in an editor and a live diff against what is on disk. You edit it by hand and press the button; nothing reaches the filesystem until you do. Claude cannot approve its own write — the commit tool is not in its tool list.",
   "author": {

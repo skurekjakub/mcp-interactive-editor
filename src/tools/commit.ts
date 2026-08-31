@@ -1,18 +1,82 @@
-import type { CommitReceipt } from "../../shared/types.js";
+import type { CommitReceipt, Proposal } from "../../shared/types.js";
 import { hasBlockers } from "../../shared/lint.js";
+import { countLines } from "../../shared/diff.js";
 import { sha256 } from "../fsGuard.js";
-import { buildEditorState, getProposal, refreshTarget, updateProposal } from "../proposals.js";
+import {
+  buildEditorState,
+  getProposal,
+  isStale,
+  resolveProposal,
+  restatTarget,
+  updateProposal,
+} from "../proposals.js";
 import type { ToolContext } from "./context.js";
 
 /**
- * The commit path. Everything the View asserted is checked again here, because
- * the View is a browser and this is the process that owns the disk.
+ * Writes a proposal to disk, re-checking everything the View asserted.
+ *
+ * The View is a browser and this is the process that owns the disk, so nothing
+ * arriving from it is trusted: containment, staleness and every blocker are
+ * evaluated again here.
+ *
+ * @param context - Guard, visibility settings and the host capability probe.
+ * @param proposalId - Which proposal to write.
+ * @returns A receipt describing exactly what landed.
+ * @throws {Error} When the proposal has resolved, was never reviewed, sits on an
+ *   unwritable path, went stale, or still carries a blocking finding.
+ * @gate Carries the "nobody commits what nobody saw" invariant.
  */
 export async function commit(context: ToolContext, proposalId: string): Promise<CommitReceipt> {
-  const { guard } = context;
   const before = getProposal(proposalId);
 
-  if (before.committedAt) throw new Error("This proposal has already been resolved.");
+  if (before.resolvedAt) {
+    throw new Error(`This proposal was already ${before.resolution ?? "resolved"}.`);
+  }
+
+  /*
+   * Claim the proposal before the first await.
+   *
+   * `resolvedAt` is not set until the write has finished, four awaits below, so
+   * two calls arriving together both read it as unset and both go on to write.
+   * On POSIX the second rename overwrites the first atomically: one approved
+   * proposal, two writes, two receipts saying it landed. Claiming synchronously
+   * is what makes the check mean what it reads as, and the panel's own busy flag
+   * cannot do it — that is React state, set a tick later than the click.
+   */
+  if (committing.has(proposalId)) {
+    throw new Error("This proposal is already being written. Wait for that to finish.");
+  }
+  committing.add(proposalId);
+  try {
+    return await write(context, proposalId, before);
+  } finally {
+    committing.delete(proposalId);
+  }
+}
+
+/**
+ * Proposals with a write in flight.
+ *
+ * Held for the duration of {@link commit} so a second entrant is refused rather
+ * than racing the first to `rename`.
+ */
+const committing = new Set<string>();
+
+/**
+ * Performs the write, once the proposal has been claimed.
+ *
+ * @param context - Guard, visibility settings and the host capability probe.
+ * @param proposalId - Which proposal to write.
+ * @param before - The proposal as it was when the claim was made.
+ * @returns A receipt describing exactly what landed.
+ * @throws {Error} When any re-checked condition refuses the write.
+ */
+async function write(
+  context: ToolContext,
+  proposalId: string,
+  before: Proposal,
+): Promise<CommitReceipt> {
+  const { guard } = context;
 
   /*
    * The load-bearing check, and the reason `attached` is not enough on its own.
@@ -38,18 +102,34 @@ export async function commit(context: ToolContext, proposalId: string): Promise<
   }
 
   const baselineAtOpen = before.baseline;
-  const proposal = await refreshTarget(guard, before);
+  const { target, baseline } = await restatTarget(guard, before);
 
-  if (!proposal.target.absolute) {
-    throw new Error(`${proposal.target.requested} is not a writable path.`);
+  // Bound once, so every write below is typed against the check rather than
+  // asserting past it and depending on this guard staying above them.
+  const absolute = target.absolute;
+  if (!absolute) {
+    throw new Error(`${target.requested} is not a writable path.`);
   }
 
-  if (sha256(proposal.baseline) !== sha256(baselineAtOpen)) {
+  /*
+   * Close the proposal on a staleness refusal rather than leaving it open.
+   *
+   * The re-read above is deliberately not stored, so a second attempt would
+   * otherwise compare the same two values and refuse identically — but only for
+   * as long as nothing persists the fresh baseline. Closing removes the question
+   * entirely: the approved diff is gone, and the only way forward is a new
+   * proposal against what is now on disk.
+   */
+  if (isStale(baseline, baselineAtOpen)) {
+    resolveProposal(proposalId, "superseded");
     throw new Error(
-      `${proposal.target.display} changed on disk while the editor was open. ` +
-        "The diff that was approved is no longer the diff that would be applied. Reopen the proposal.",
+      `${target.display} changed on disk while the editor was open. ` +
+        "The diff that was approved is not the diff that would be applied. " +
+        "This proposal is closed; open a new one against the current file.",
     );
   }
+
+  const proposal = updateProposal(proposalId, { target, baseline });
 
   const findings = buildEditorState(guard, proposal).findings;
   if (hasBlockers(findings)) {
@@ -59,18 +139,18 @@ export async function commit(context: ToolContext, proposalId: string): Promise<
 
   const result =
     proposal.mode === "delete"
-      ? (await guard.remove(proposal.target.absolute), { bytes: 0, sha256: sha256("") })
-      : await guard.commit(proposal.target.absolute, proposal.content);
+      ? (await guard.remove(absolute), { bytes: 0, sha256: sha256("") })
+      : await guard.commit(absolute, proposal.content, proposal.target.onDisk?.mode);
 
-  updateProposal(proposalId, { committedAt: new Date().toISOString() });
+  resolveProposal(proposalId, "committed");
 
   return {
     ok: true,
-    path: proposal.target.absolute,
+    path: absolute,
     display: proposal.target.display,
     mode: proposal.mode,
     bytes: result.bytes,
-    lines: proposal.content === "" ? 0 : proposal.content.split("\n").length,
+    lines: countLines(proposal.content),
     sha256: result.sha256,
     dryRun: guard.dryRun,
     editedByHuman: proposal.content !== proposal.originalContent,

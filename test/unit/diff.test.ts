@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffLines, formatUnifiedDiff, splitLines } from "../../shared/diff.js";
+import { countLines, diffLines, formatUnifiedDiff, splitLines } from "../../shared/diff.js";
 
 const lines = (n: number, prefix = "line") =>
   Array.from({ length: n }, (_, i) => `${prefix} ${i}`).join("\n");
@@ -13,8 +13,29 @@ describe("splitLines", () => {
     expect(splitLines("a\r\nb")).toEqual(["a", "b"]);
   });
 
-  it("counts a trailing newline as a final empty line", () => {
-    expect(splitLines("a\n")).toEqual(["a", ""]);
+  /*
+   * A trailing newline terminates the last line rather than starting an empty
+   * one. Counting it as a line inflates the receipt, the on-disk size, the `@@`
+   * headers and the destructive-write ratio, and renders a phantom empty row.
+   */
+  it("treats a trailing newline as terminating the last line", () => {
+    expect(splitLines("a\n")).toEqual(["a"]);
+    expect(splitLines("a\nb\n")).toEqual(["a", "b"]);
+    expect(splitLines("a\nb")).toEqual(["a", "b"]);
+  });
+
+  it("keeps interior blank lines, which are real lines", () => {
+    expect(splitLines("a\n\nb\n")).toEqual(["a", "", "b"]);
+  });
+
+  it("counts one line for one line of text", () => {
+    expect(countLines("hello\n")).toBe(1);
+    expect(countLines("")).toBe(0);
+  });
+
+  it("notices a change that only adds the final newline", () => {
+    const { stats } = diffLines("a\nb", "a\nb\n");
+    expect(stats.newlineAtEofChanged).toBe(true);
   });
 });
 
@@ -105,5 +126,43 @@ describe("formatUnifiedDiff", () => {
     expect(text).toContain("-b");
     expect(text).toContain("+c");
     expect(text).toMatch(/@@ -\d+,\d+ \+\d+,\d+ @@/);
+  });
+});
+
+describe("the cost of diffing lopsided files", () => {
+  it("falls back to a wholesale replacement when the table would be enormous", () => {
+    // Arrange: one side well under the per-side limit, the other far over it.
+    // A guard that needs *both* sides over budget lets this through and
+    // allocates a table of (1500 * 200000) Uint32 cells.
+    const small = Array.from({ length: 1_400 }, (_, i) => `a${i}`).join("\n");
+    const huge = Array.from({ length: 200_000 }, (_, i) => `b${i}`).join("\n");
+
+    // Act.
+    const started = Date.now();
+    const { stats } = diffLines(small, huge);
+    const elapsed = Date.now() - started;
+
+    // Assert.
+    expect(stats.truncated).toBe(true);
+    expect(elapsed).toBeLessThan(5_000);
+  });
+
+  it("still diffs a small change in a large file line by line", () => {
+    const before = Array.from({ length: 3_000 }, (_, i) => `line ${i}`).join("\n");
+    const after = before.replace("line 1500", "changed");
+
+    const { stats } = diffLines(before, after);
+
+    // The common prefix and suffix collapse first, so the table stays tiny.
+    expect(stats.truncated).toBeUndefined();
+    expect(stats).toMatchObject({ added: 1, removed: 1 });
+  });
+
+  it("diffs one line against a few thousand without truncating", () => {
+    const after = Array.from({ length: 3_000 }, (_, i) => `new ${i}`).join("\n");
+
+    const { stats } = diffLines("only\n", after);
+
+    expect(stats.truncated).toBeUndefined();
   });
 });

@@ -638,48 +638,6 @@ button {
   background: var(--paper);
 }
 
-/* Regions already pinned. The lock edge marks the ones taken from the diff, so
-   a chip's line numbers can be read against the right side of the change. */
-.selection-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.selection-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 4px 2px 9px;
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  background: var(--paper-sunk);
-  color: var(--ink-dim);
-  font-family: var(--sans);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.selection-chip[data-source="diff"] {
-  border-left: 3px solid var(--lock);
-}
-
-.selection-chip-drop {
-  padding: 3px;
-  border: 0;
-  border-radius: 50%;
-  background: none;
-  color: var(--ink-faint);
-  font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.selection-chip-drop:hover {
-  color: var(--ink);
-  background: var(--paper-raised);
-}
-
 .selection-quote {
   display: flex;
   align-items: center;
@@ -863,13 +821,4 @@ button {
 .selection-chip-drop:hover {
   color: var(--ink);
   background: var(--paper-raised);
-}
-
-.sent-note {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--rule);
-  background: var(--paper);
-  font-size: 12px;
-  color: var(--ink-dim);
-  border-left: 3px solid var(--add);
 }

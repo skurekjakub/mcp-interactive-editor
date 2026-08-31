@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { messageOf, refusalIn, textOf } from "../../ui/src/lib/results.js";
+import { deliveredIn, messageOf, refusalIn, textOf } from "../../ui/src/lib/results.js";
 
-const result = (over: Partial<CallToolResult>): CallToolResult =>
-  ({ content: [], ...over }) as CallToolResult;
+const result = (over: Partial<CallToolResult>): CallToolResult => ({ content: [], ...over });
 
 describe("refusalIn", () => {
   /*
@@ -59,5 +58,26 @@ describe("messageOf", () => {
 
   it("copes with whatever else a rejection threw", () => {
     expect(messageOf("just a string")).toBe("just a string");
+  });
+});
+
+describe("deliveredIn", () => {
+  it("reports delivered when the server says so", () => {
+    expect(deliveredIn(result({ structuredContent: { delivered: true } }))).toBe(true);
+  });
+
+  it("reports not delivered when the field is absent", () => {
+    // The panel sends the message itself unless it is told not to, so an absent
+    // field has to mean "nobody has said this yet". Reading it the other way
+    // drops the outcome silently.
+    expect(deliveredIn(result({ structuredContent: {} }))).toBe(false);
+  });
+
+  it("reports not delivered when there is no structured half at all", () => {
+    expect(deliveredIn(result({}))).toBe(false);
+  });
+
+  it("does not accept a truthy value that is not true", () => {
+    expect(deliveredIn(result({ structuredContent: { delivered: "yes" } }))).toBe(false);
   });
 });

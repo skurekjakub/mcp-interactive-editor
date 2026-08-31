@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   annotatePassage,
   attachPassage,
-  describePassages,
   isAnswered,
   passageFromRows,
   passageFromSelection,
@@ -42,10 +41,6 @@ describe("passageFromSelection", () => {
     expect(selected?.endLine).toBe(3);
   });
 
-  it("keeps the character range, so the draft can be edited around it", () => {
-    expect(passageFromSelection(draft, 4, 7)).toMatchObject({ start: 4, end: 7 });
-  });
-
   it("identifies a region by where it is, so the same one cannot stack twice", () => {
     expect(passageFromSelection(draft, 4, 7)?.id).toBe(passageFromSelection(draft, 4, 7)?.id);
     expect(passageFromSelection(draft, 4, 7)?.id).not.toBe(passageFromSelection(draft, 0, 3)?.id);
@@ -59,8 +54,8 @@ describe("passageFromRows", () => {
 
   it("joins the rows and takes the range from the first and last", () => {
     const selected = passageFromRows([
-      { line: 12, text: "  - run: npm ci" },
-      { line: 13, text: "  - run: npm test" },
+      { line: 12, newLine: 12, kind: "equal", text: "  - run: npm ci" },
+      { line: 13, newLine: 13, kind: "equal", text: "  - run: npm test" },
     ]);
 
     expect(selected).toMatchObject({
@@ -71,8 +66,37 @@ describe("passageFromRows", () => {
     });
   });
 
+  /*
+   * Dragging across a removal and the line replacing it is the most common
+   * thing to comment on. A removed row's gutter number belongs to the old file
+   * and an added row's to the new one, so taking first and last as they come
+   * yields a backwards range whose two ends are from different files.
+   */
+  it("names a mixed selection against the new file, in order", () => {
+    const selected = passageFromRows([
+      { line: 10, newLine: null, kind: "remove", text: "old" },
+      { line: 9, newLine: 9, kind: "add", text: "new" },
+    ]);
+
+    expect(selected?.startLine).toBe(9);
+    expect(selected?.endLine).toBe(9);
+    expect(rangeOf(selected!)).toBe("line 9");
+  });
+
+  it("falls back to the old file when the selection is only removals", () => {
+    const selected = passageFromRows([
+      { line: 4, newLine: null, kind: "remove", text: "gone" },
+      { line: 5, newLine: null, kind: "remove", text: "also gone" },
+    ]);
+
+    expect(selected?.startLine).toBe(4);
+    expect(selected?.endLine).toBe(5);
+  });
+
   it("carries the row text as given, markers already stripped by the pane", () => {
-    expect(passageFromRows([{ line: 3, text: "plain" }])?.text).toBe("plain");
+    expect(passageFromRows([{ line: 3, newLine: 3, kind: "equal", text: "plain" }])?.text).toBe(
+      "plain",
+    );
   });
 });
 
@@ -152,14 +176,6 @@ describe("rangeOf", () => {
 
   it("names a span", () => {
     expect(rangeOf(passage({ startLine: 7, endLine: 9 }))).toBe("lines 7–9");
-  });
-});
-
-describe("describePassages", () => {
-  it("counts once there is more than one", () => {
-    expect(describePassages([])).toBe("nothing");
-    expect(describePassages([passage()])).toBe("line 1");
-    expect(describePassages([passage(), passage({ id: "b" })])).toBe("2 passages");
   });
 });
 

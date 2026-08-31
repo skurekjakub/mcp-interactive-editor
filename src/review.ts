@@ -1,29 +1,31 @@
 import type { ReviewOutcome } from "../shared/types.js";
 
 /**
- * The tool call that opened the editor waits here until a human decides.
+ * @module
  *
- * This is what makes the panel a gate rather than a viewer: `propose_write` does
- * not return the moment the panel opens, it returns what happened in it. The
- * agent finds out that its draft was rejected, and why, in the result of the
- * call it already made — not in a message it has to be told to go and read.
+ * Where a tool call waits while a human decides.
+ *
+ * This is what makes the panel a gate rather than a viewer under
+ * `--block-on-review`: the opening call returns what happened in the editor
+ * rather than the fact that it opened. The agent learns that its draft was
+ * rejected, and why, in the result of the call it already made.
  */
 
 /** Long enough to actually read a diff, short enough that a walked-away review ends. */
 export const REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
- * Long enough for a panel to mount and attach, short enough not to stall a host
- * that never will.
+ * How long to wait for a panel to mount and attach.
  *
- * Generous on purpose. A first mount has to fetch a half-megabyte UI resource,
- * boot an iframe, run React, finish the ui/initialize handshake and only then
- * call a tool. This was four seconds and the panel lost that race every time:
- * the grace expired, the call returned "nobody answered", and the review that
- * was supposed to block simply did not.
+ * Generous on purpose. A first mount fetches a half-megabyte UI resource, boots
+ * an iframe, runs React, finishes the `ui/initialize` handshake and only then
+ * calls a tool. A grace period shorter than that loses the race every time: it
+ * expires, the call reports that nobody answered, and the review that was meant
+ * to block does not.
  */
 export const REVIEW_GRACE_MS = 30_000;
 
+/** One outstanding review, and how to end it. */
 interface Waiting {
   resolve: (outcome: ReviewOutcome) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -31,6 +33,14 @@ interface Waiting {
 
 const waiting = new Map<string, Waiting>();
 
+/**
+ * Registers a review and returns a promise for its outcome.
+ *
+ * @param proposalId - The proposal being reviewed.
+ * @param timeoutMs - How long to wait before reporting that nobody answered.
+ * @returns The outcome, once something decides it.
+ * @throws {Error} When a review is already outstanding for that proposal.
+ */
 export function awaitReview(
   proposalId: string,
   timeoutMs: number = REVIEW_TIMEOUT_MS,
@@ -54,7 +64,13 @@ export function awaitReview(
   });
 }
 
-/** Ends the wait. False when nothing was waiting — the caller is not the gate. */
+/**
+ * Ends a wait with an outcome.
+ *
+ * @param proposalId - The proposal being resolved.
+ * @param outcome - What happened in the editor.
+ * @returns False when nothing was waiting, so the caller is not the gate.
+ */
 export function resolveReview(proposalId: string, outcome: ReviewOutcome): boolean {
   const found = waiting.get(proposalId);
   if (!found) return false;
@@ -65,6 +81,12 @@ export function resolveReview(proposalId: string, outcome: ReviewOutcome): boole
   return true;
 }
 
+/**
+ * Reports whether a review is still outstanding.
+ *
+ * @param proposalId - The proposal to check.
+ * @returns True while something is waiting on it.
+ */
 export function isAwaitingReview(proposalId: string): boolean {
   return waiting.has(proposalId);
 }

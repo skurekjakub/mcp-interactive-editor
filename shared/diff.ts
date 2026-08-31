@@ -1,6 +1,11 @@
 /**
- * A line diff with no dependencies, because the View has to run inside a
- * sandboxed iframe with no network and the server has to agree with it exactly.
+ * @module
+ *
+ * A line diff with no dependencies.
+ *
+ * The View runs inside a sandboxed iframe with no network and the server has to
+ * agree with it exactly, so both sides run this same module rather than a
+ * library one of them could not load.
  *
  * Strategy: trim the common prefix and suffix first — which collapses the usual
  * case of a small edit in a large file down to almost nothing — then run an LCS
@@ -9,14 +14,65 @@
  */
 import type { DiffHunk, DiffLine, DiffStats } from "./types.js";
 
-const LCS_LINE_BUDGET = 1500;
+/**
+ * Largest LCS table the panel will build, in cells.
+ *
+ * The table is `(n+1)*(m+1)` `Uint32` cells, so the product is what costs memory
+ * and time. Bounding the product rather than each side keeps a lopsided diff
+ * cheap: a short file against an enormous one is under any per-side limit and
+ * still allocates gigabytes.
+ */
+const LCS_CELL_BUDGET = 1500 * 1500;
+
+/** How many unchanged lines to keep either side of a change. */
 const CONTEXT_LINES = 3;
 
+/**
+ * Splits text into its lines.
+ *
+ * A trailing newline terminates the last line rather than starting an empty one,
+ * so `"a\nb\n"` is two lines. Treating the empty remainder as a line inflates
+ * every count derived from it — the receipt, the on-disk size, the `@@` headers,
+ * and the ratio that decides whether a write is destructive — and renders a
+ * phantom empty row in the diff.
+ *
+ * @param text - The file contents, with either line ending.
+ * @returns One entry per line, without terminators.
+ */
 export function splitLines(text: string): string[] {
   if (text === "") return [];
-  return text.replace(/\r\n/g, "\n").split("\n");
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
 }
 
+/**
+ * Counts the lines in a piece of text.
+ *
+ * @param text - The file contents.
+ * @returns The number of lines, counting a terminated final line once.
+ */
+export function countLines(text: string): number {
+  return splitLines(text).length;
+}
+
+/**
+ * Reports whether text ends with a line terminator.
+ *
+ * @param text - The file contents.
+ * @returns True when the final line is terminated.
+ */
+export function endsWithNewline(text: string): boolean {
+  return text.endsWith("\n");
+}
+
+/**
+ * Diffs two files line by line.
+ *
+ * @param before - The file as it is on disk.
+ * @param after - The file as it is proposed.
+ * @returns Hunks ready to render, and the counts that describe them.
+ */
 export function diffLines(before: string, after: string): { hunks: DiffHunk[]; stats: DiffStats } {
   const a = splitLines(before);
   const b = splitLines(after);
@@ -36,7 +92,11 @@ export function diffLines(before: string, after: string): { hunks: DiffHunk[]; s
   const midA = a.slice(prefix, a.length - suffix);
   const midB = b.slice(prefix, b.length - suffix);
 
-  const truncated = midA.length > LCS_LINE_BUDGET && midB.length > LCS_LINE_BUDGET;
+  // The table is what has to be afforded, not either side of it. Requiring both
+  // sides to be over budget leaves the product unbounded: 1500 lines against
+  // 1.5 million is under the per-side limit on one side and nine gigabytes of
+  // Uint32 on the machine.
+  const truncated = midA.length * midB.length > LCS_CELL_BUDGET;
   const middle: DiffLine[] = truncated
     ? wholesaleReplace(midA, midB, prefix)
     : lcsDiff(midA, midB, prefix);
@@ -49,15 +109,33 @@ export function diffLines(before: string, after: string): { hunks: DiffHunk[]; s
       .map((text, i) => line("equal", a.length - suffix + i + 1, b.length - suffix + i + 1, text)),
   ];
 
+  /*
+   * Adding or removing the final newline changes no line, so the LCS above sees
+   * nothing. Recording it separately keeps the panel from reporting "no changes"
+   * for a write that does in fact alter the bytes on disk.
+   */
+  const newlineChanged =
+    before !== "" && after !== "" && endsWithNewline(before) !== endsWithNewline(after);
+
   const stats: DiffStats = {
     added: lines.filter((l) => l.kind === "add").length,
     removed: lines.filter((l) => l.kind === "remove").length,
     ...(truncated ? { truncated: true } : {}),
+    ...(newlineChanged ? { newlineAtEofChanged: true } : {}),
   };
 
   return { hunks: toHunks(lines), stats };
 }
 
+/**
+ * Builds one diff line.
+ *
+ * @param kind - Which side of the diff the line belongs to.
+ * @param oldLine - Line number in the old file, or null when added.
+ * @param newLine - Line number in the new file, or null when removed.
+ * @param text - The line itself.
+ * @returns The assembled diff line.
+ */
 function line(
   kind: DiffLine["kind"],
   oldLine: number | null,
@@ -67,6 +145,14 @@ function line(
   return { kind, oldLine, newLine, text };
 }
 
+/**
+ * Represents a change as a complete removal followed by a complete insertion.
+ *
+ * @param a - Lines of the old file.
+ * @param b - Lines of the new file.
+ * @param offset - Line number the region starts at.
+ * @returns Every old line removed, then every new line added.
+ */
 function wholesaleReplace(a: string[], b: string[], offset: number): DiffLine[] {
   return [
     ...a.map((text, i) => line("remove", offset + i + 1, null, text)),
@@ -74,7 +160,14 @@ function wholesaleReplace(a: string[], b: string[], offset: number): DiffLine[] 
   ];
 }
 
-/** Classic LCS table walk. Bounded by LCS_LINE_BUDGET on both axes. */
+/**
+ * Walks a classic LCS table to produce a minimal edit script.
+ *
+ * @param a - Lines of the old file, already trimmed of common affixes.
+ * @param b - Lines of the new file, already trimmed of common affixes.
+ * @param offset - Line number the trimmed region starts at.
+ * @returns The diff lines for that region.
+ */
 function lcsDiff(a: string[], b: string[], offset: number): DiffLine[] {
   const n = a.length;
   const m = b.length;
@@ -117,7 +210,12 @@ function lcsDiff(a: string[], b: string[], offset: number): DiffLine[] {
   return out;
 }
 
-/** Collapse long runs of unchanged lines into hunks with a few lines of context. */
+/**
+ * Collapses long runs of unchanged lines into hunks with a few lines of context.
+ *
+ * @param lines - The complete diff, including unchanged lines.
+ * @returns Only the regions worth showing.
+ */
 function toHunks(lines: DiffLine[]): DiffHunk[] {
   const changed = lines.map((l, i) => (l.kind === "equal" ? -1 : i)).filter((i) => i !== -1);
   if (changed.length === 0) return [];
@@ -144,18 +242,41 @@ function toHunks(lines: DiffLine[]): DiffHunk[] {
   });
 }
 
-/** Unified-diff text, for hosts that cannot render the editor and for copy buttons. */
-export function formatUnifiedDiff(hunks: DiffHunk[], label: string): string {
+/**
+ * Renders hunks as unified-diff text.
+ *
+ * The output is intended to be readable and to apply cleanly, so a file whose
+ * final line is unterminated carries the `\ No newline at end of file` marker
+ * that `patch` and `git apply` expect.
+ *
+ * @param hunks - The regions to render.
+ * @param label - File name to put in the header.
+ * @param eof - Whether each side ends with a newline, when known.
+ * @returns The unified diff, or a note that nothing changed.
+ */
+export function formatUnifiedDiff(
+  hunks: DiffHunk[],
+  label: string,
+  eof?: { before: boolean; after: boolean },
+): string {
   if (hunks.length === 0) return `(no changes to ${label})`;
   const out: string[] = [`--- ${label} (on disk)`, `+++ ${label} (proposed)`];
-  for (const hunk of hunks) {
+
+  hunks.forEach((hunk, hunkIndex) => {
     const oldCount = hunk.lines.filter((l) => l.kind !== "add").length;
     const newCount = hunk.lines.filter((l) => l.kind !== "remove").length;
     out.push(`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`);
-    for (const line of hunk.lines) {
-      const marker = line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " ";
-      out.push(marker + line.text);
-    }
-  }
+
+    hunk.lines.forEach((entry, lineIndex) => {
+      const marker = entry.kind === "add" ? "+" : entry.kind === "remove" ? "-" : " ";
+      out.push(marker + entry.text);
+
+      const lastOfAll = hunkIndex === hunks.length - 1 && lineIndex === hunk.lines.length - 1;
+      if (!lastOfAll || !eof) return;
+      const unterminated = entry.kind === "remove" ? !eof.before : !eof.after;
+      if (unterminated) out.push("\\ No newline at end of file");
+    });
+  });
+
   return out.join("\n");
 }

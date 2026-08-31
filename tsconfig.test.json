@@ -2,6 +2,14 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    /*
+     * The release scripts are plain `.mjs`. `allowJs` is what lets a test import
+     * one; `checkJs` stays off because inferring parameter types there would
+     * require type annotations in JSDoc, which the comment policy forbids.
+     * `scripts/versions.mjs` is covered by `test/unit/release.test.ts` and
+     * `scripts/check-comments.mjs` runs for real in `npm run verify`.
+     */
+    "allowJs": true,
     "types": ["vitest/globals", "node"]
   },
   // `ui/src/lib` only: those modules are pure by rule, so they typecheck under

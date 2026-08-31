@@ -5,21 +5,36 @@ import { Editor } from "./Editor.js";
 import { DiffPane } from "./DiffPane.js";
 import { ViewToggle, type View } from "./ViewToggle.js";
 
+/** Properties of the two-pane review surface. */
 interface ReviewPanesProps {
   view: View;
   onViewChange: (next: View) => void;
   content: string;
   onContentChange: (next: string) => void;
-  /** Both panes report selections; whichever you last dragged in wins. */
-  onSelect: (passage: Passage | null, anchor: SelectionAnchor | null) => void;
+  /** Both panes report selections; whichever was last dragged in wins. */
+  onSelect: (passage: Passage | null, anchor: SelectionAnchor | null, fromPointer: boolean) => void;
   hunks: DiffHunk[];
   target: TargetInfo;
   isDelete: boolean;
 }
 
 /**
- * The draft on the left, what it does to the file on the right. A delete has no
- * draft to show, so it collapses to the diff alone.
+ * Renders the draft on the left and what it does to the file on the right.
+ *
+ * The editor is never taken away while there is a draft: removing it leaves a
+ * change that cannot be touched, and the point of the panel is that the draft
+ * belongs to the human. In the diff-only view it shrinks instead, so the diff
+ * gets the room while the text stays in reach.
+ *
+ * A delete has no draft to show and collapses to the diff alone. That pane then
+ * has to stay visible whatever the view setting says, because the view toggle
+ * lives in the pane headers — hiding both panes would take the control that
+ * restores them off screen with them.
+ *
+ * @param props - Component properties.
+ * @param props.view - Which panes the human has asked for.
+ * @param props.isDelete - Whether the proposal removes the file.
+ * @returns The review surface.
  */
 export function ReviewPanes({
   view,
@@ -31,14 +46,8 @@ export function ReviewPanes({
   target,
   isDelete,
 }: ReviewPanesProps) {
-  /*
-   * The editor is never taken away. "diff" used to remove it outright, which
-   * left you looking at a change you could not touch — and the whole point of
-   * the panel is that the draft is yours to edit. It now shrinks instead, so the
-   * diff gets the room while the text stays in reach.
-   */
   const showEditor = !isDelete;
-  const showDiff = view !== "edit";
+  const showDiff = isDelete || view !== "edit";
   const compactEditor = view === "diff";
 
   return (

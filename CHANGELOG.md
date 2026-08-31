@@ -6,6 +6,260 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-31
+
+Four more audits — bug hunting, refactoring, tooling and test quality — each
+verified against the vendored specifications, and every defect below reproduced
+before it was changed.
+
+### Fixed
+
+- **A flag could eat the next flag.** `--deny --dry-run` took `--dry-run` as the
+  deny pattern and left a server that writes to disk when it was asked to
+  simulate. A value that begins with a dash and a letter is now refused, naming
+  the flag that followed and pointing at `--flag=value` for the rare case where
+  that really is the value.
+- **Two live drafts of one file could both commit.** The supersede check
+  re-resolved the requested path against the working directory while the guard
+  resolved it against the configured root. Where those differ — which is the
+  shipped `.mcpb` configuration — two spellings of one file compared unequal,
+  nothing was superseded, and the older draft landed last over the newer one with
+  both reporting success. Resolved targets are now compared directly, and without
+  case folding, which would have closed a live review on a case-sensitive
+  filesystem.
+- **A CRLF file rewritten to LF showed an empty diff and no findings.** Lines are
+  compared with their terminators stripped, so every line ending in the file
+  could change while the panel reported no change at all — under a live Save
+  button. It now says so, and offers to keep the file's own endings.
+- **The trailing-whitespace check was quadratic.** A long run of spaces the line
+  did not end with took minutes rather than milliseconds, on a scan that runs on
+  every keystroke in the panel and again before every commit. It is a linear pass
+  now, and preserves CRLF and the final newline.
+- **The diff budget bounded each side rather than the table.** A short file
+  against an enormous one was under the per-side limit on one side and allocated
+  gigabytes. The bound is on the product now.
+- **A missing path segment lost a character** when the walk up reached the
+  filesystem root, because a root already ends with its separator. The write went
+  to a path nobody asked for — and, with the wrong root, one still inside it.
+- **Two concurrent commits both cleared the resolved check**, which is not
+  reached until after the write. On POSIX that is one approved proposal, two
+  writes and two receipts. A proposal is now claimed before the first `await`.
+- **Nothing capped what a tool call carried.** `path` and `content` had no
+  bounds, so a proposal could be larger than any file this editor would agree to
+  open, and an over-long path failed at `rename` with a raw errno quoting an
+  internal temp name. Both are bounded at the schema now.
+- **The model diff was capped in lines, not characters**, so a single enormous
+  line was handed over whole with no truncation note.
+- **The panel round-tripped twice on every mount.** Both the claim and the attach
+  effect wrote the phase they depended on, so each cancelled its own first call
+  and started again — two re-reads of the file, and two attaches whose stored
+  baselines could differ.
+- **A cancelled session reported itself as attaching.** The phase description
+  defaulted, so the one phase that means "stop waiting" read as progress.
+- **The panel and the model gave different accounts of a refused path.** The
+  model was told which check refused it; the human got a single collapsed
+  sentence. Both now read the same explanation.
+- **The commit gate had no type behind it.** The SDK's capability helper names a
+  type its own package does not export, so its return value resolved to the error
+  type and every property read off it checked against nothing. The shape is
+  verified explicitly now, and covered by unit tests rather than only by a
+  subprocess.
+- **CI ran the panel suite on an unsupported Node.** `.nvmrc` pinned 20.10.0
+  while jsdom, undici and whatwg-url all require newer. Pinned to 22 with
+  `engine-strict` so the mismatch cannot come back quietly.
+
+### Changed
+
+- Assembling the editor state, explaining a refusal and describing a commit each
+  live in one place in `shared/`. There were four copies of the first, and one of
+  them had already reintroduced a line-count defect fixed elsewhere.
+- Command-line parsing moved to `src/cli.ts`, reading its environment, working
+  directory and home directory as arguments — so every decision it makes is
+  reachable from a unit test rather than only from a spawned server.
+- `src/tools/results.ts` is now `src/tools/wording.ts`, which is what its own
+  module docblock already called it, and no longer collides with the panel's
+  `results.ts`.
+- The commit tool declares its annotations. Under `--terminal-approval` the
+  client's own approve/deny prompt is the entire gate, and that prompt is
+  rendered from them.
+- A proposal dropped to make room is remembered as superseded, so a panel holding
+  its id is told what happened rather than that the server does not know it.
+- The unused `files` field is gone from `package.json`, and the README no longer
+  documents a command-line binary that does not exist.
+
+### Added
+
+- ESLint, type-aware, in `npm run verify` and CI, along with `knip` for dead
+  exports and `npm audit --omit=dev` for what actually ships.
+- Tests for the command line, the commit gate's host check, the proposal store,
+  the input bounds and the commit threshold. The threshold had five conditions
+  keeping the button shut and no test held any of them.
+- A finding for a change that alters only the newline at the end of a file, which
+  the diff cannot show.
+
+### Testing
+
+- Removed assertions that could not fail: an editor `disabled` property never
+  set, a truthiness check on an already-filtered list, a temp-file check keyed to
+  a string copied out of the implementation, and a declaration-count floor below
+  the true count. Each was replaced by one that fails when the behaviour breaks.
+- The review-gate tests get their own server. They shared a grace period pinned
+  short for the opposite reason and lost the race roughly one shuffled run in
+  three.
+- The claim test now opens two proposals. With one open it took the single-open
+  fallback and passed only because earlier tests had left proposals behind.
+
+## [0.6.0] - 2026-08-31
+
+Four independent audits of the whole surface — server, panel, build and one
+deliberately unscoped — checked against the vendored MCP Apps and MCP
+specifications. Where two agents reached the same conclusion independently it is
+noted below. Everything here was reproduced before it was changed.
+
+### Security
+
+- **A malformed UI capability opened the commit gate.** `hostRendersPanel`
+  treated an absent `mimeTypes` list as support, so a client declaring
+  `extensions: {"io.modelcontextprotocol/ui": {}}` — no mime types at all —
+  passed the check that exists to prove a panel can render. MCP Apps § Client
+  Capabilities marks the field REQUIRED and `getUiCapability` validates nothing,
+  so an absent list is a malformed declaration, not a permissive one. The gate
+  now requires the declared list to contain `text/html;profile=mcp-app`.
+- **`editor_update` could re-point a proposal at another file.** The reviewed
+  file and the written file could differ, while the only human-visible decision
+  point — the client's approval prompt for `editor_commit` — shows an opaque
+  identifier and no path. The target is now immutable; changing it means opening
+  a new proposal, which shows a new diff.
+- **`--root=` with an empty value silently made the working directory
+  writable**, which is what an operator writing `--root="$PROJECT_DIR"` gets
+  from an unset variable. `--deny=` put the empty string in the deny list and
+  refused every path in the roots, reported as "outside the roots". Both are
+  now startup failures.
+
+### Fixed
+
+- **Saving twice walked through the stale-file refusal and destroyed the other
+  writer's change.** The pre-commit re-stat persisted the fresh baseline before
+  the comparison, so the second attempt compared the new file against itself and
+  wrote. The re-stat is now pure, and a staleness refusal closes the proposal.
+- **A refused flush before a commit was ignored**, so the server wrote whatever
+  the debounce last managed to send — bytes nobody had looked at — under a green
+  receipt. Every panel tool call now goes through one helper that cannot
+  silently drop a refusal. _(Found independently by the panel and whole-repo
+  audits.)_
+- **Refusals carrying no text were reported as the empty string**, which reads
+  as "no failure" to anything rendering on truthiness: the button reset and
+  nothing appeared. _(Two audits.)_
+- **A commit result without a receipt produced a TypeError as the user-facing
+  message**, on a call that had in fact written the file.
+- **Tab replaced a multi-line selection with two spaces**, and React's
+  controlled value made the browser's own undo unreliable. Tab now indents each
+  touched line, and Shift+Tab moves focus instead of being swallowed (WCAG
+  2.1.2).
+- **A delete proposal in the editor-only view rendered an empty panel** with no
+  way back, because the view toggle lives in the pane headers and unmounted with
+  them.
+- **Discarding did nothing observable.** The server resolved the proposal while
+  the panel left the review editable with a live commit button.
+- **A trailing newline was counted as an extra line everywhere** — the receipt,
+  the on-disk size, the `@@` headers, the destructive-deletion ratio, and a
+  phantom empty row in the diff. A change that only adds or removes the final
+  newline is now reported rather than silently producing an empty diff. _(Two
+  audits.)_
+- **Commenting on a removal and its replacement produced a backwards line
+  range** whose two ends came from different files. Ranges are now reported
+  against the new file. Selections ending on a newline no longer name a line
+  that was not selected.
+- **Every rejection was reported as "outside the roots"**, including files
+  sitting inside a root that the deny list caught — printed directly above the
+  root containing them. Rejections now name the check that refused them, and the
+  deny pattern that matched. _(Two audits.)_
+- **Deny patterns matched bare substrings**, so `shortcuts.keymap.ts`,
+  `notes.environment.md` and `notes.pemberton.md` were refused. Patterns are now
+  anchored to whole filenames and extensions. _(Two audits.)_
+- **A directory target threw instead of returning a rendered refusal**,
+  contradicting the documented contract and leaving the mounted panel with no
+  handle to claim. _(Two audits.)_
+- **Committing replaced the file's permissions with the process umask**, so
+  editing a `0755` script through the editor left it `0644`. The temp file is
+  now `chmod`-ed to match before the rename. _(Two audits.)_
+- **Proposals were never evicted.** A panel the human scrolled past stayed open
+  forever, each retaining the file three times over, and the second abandoned
+  proposal defeated the single-open fallback the panel depends on. _(Two
+  audits.)_
+- **A discarded proposal reported itself as committed**, because one field meant
+  both. Resolution is now recorded separately.
+- **`propose_delete` on a file that does not exist reported a successful
+  deletion.**
+- **A discard before the panel attached burned the whole grace period** before
+  the opening call returned.
+- **The commit receipt shipped the whole file body back to the model** through a
+  blocking opener, contradicting the tool's own description.
+- **`read_file` had no size ceiling** and the target was read three or four
+  times per opening call. Reads are now capped and the resolved target is passed
+  through once. _(Two audits.)_
+- **Non-numeric timing flags became `NaN` and silently disabled the wait they
+  configured**, reporting the timeout as "within NaN minutes". _(Two audits.)_
+- **A failed attach left a fully live-looking editor** whose commit the server
+  would refuse. Attaching now retries, and the button reflects it.
+- **A stale failure stayed pinned to a working panel**, and a cancelled tool call
+  went unnoticed entirely.
+- **The comment popover overflowed a narrow panel** by a fixed width that
+  clamping cannot fix, stole focus mid-keyboard-selection, and was not exposed
+  as a dialog.
+- **An uncommented live selection rode along with a send**, contradicting the
+  rule the tray enforces on screen. The tray now counts and blocks on exactly
+  what would be sent.
+- **A refused send discarded the typed message** with no way to recover it.
+- **Typing stalled on files of a few hundred lines**, because the diff and lint
+  recomputed synchronously inside render on every keystroke.
+
+### Changed
+
+- **`propose_write` and `propose_delete` described the opposite of what they
+  do.** Their descriptions promised to wait for a human verdict while the
+  shipped default returns immediately, telling the model its next observation
+  would be a decision when it is a diff. Descriptions are now generated from the
+  running configuration, so they cannot drift from it again.
+- **`list_roots` reports the server version**, which is the only way to confirm
+  a plugin update actually took.
+- **A refused path is now an error result.** An agent checking only `isError`
+  read a refusal as an opened panel and waited for a human who was shown
+  nothing.
+- **`readOnlyHint` corrected** on the tools that initiate writes.
+- `_meta.ui` is served on the `resources/read` content item, which is where the
+  spec's normative CSP construction reads it from.
+
+### Added
+
+- **A vendored comment policy (`docs/comment-policy.md`) and a checker that
+  enforces it.** `npm run lint:comments` walks the TypeScript AST and fails the
+  build on a missing docblock, a malformed tag section, or narration — incident
+  retellings, counts, and version numbers attached to behaviour.
+- **End-to-end coverage of the shipped default.** The whole suite ran with
+  `--block-on-review`, which no shipped configuration passes, so the mode every
+  install actually runs had none.
+- **A release-manifest test.** Nothing checked that the declared versions agreed,
+  and `npm run bump` reported success on a tree where only `package.json` had
+  moved — leaving the plugin cache key stale for good.
+- **CI now fails a pull request that changes `src/`, `shared/` or `ui/` without
+  a version bump**, packs the extension so the manifest schema is validated,
+  reports the artifact checksum, and fails if a containment test self-skips on
+  Linux.
+- Panel tests for the commit flow, the discard flow and the comment tray, driven
+  through a stub bridge.
+- A `.mcpbignore`, so a stray file in `bundle/` cannot ship inside the extension.
+
+### Fixed (build)
+
+- **`npm run pack` deleted the committed `bundle/` and then failed**, leaving the
+  repository holding an artifact with no manifest and no panel — the command the
+  README tells contributors to run. It now builds first and checks its inputs
+  before deleting anything.
+- `npm run coverage` could not run; the coverage provider was never a dependency.
+- The `node` test project would have run any panel test written as `.ts` in an
+  environment with no DOM.
+
 ## [0.5.2] - 2026-08-31
 
 ### Fixed
@@ -357,7 +611,9 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.2...v0.5.0

@@ -1,7 +1,27 @@
 import type { CommitReceipt } from "../../../shared/types.js";
 
-/** What actually landed. The panel's last word, after the door has shut. */
-export function Receipt({ receipt }: { receipt: CommitReceipt }) {
+/** Properties of the receipt screen. */
+interface ReceiptProps {
+  receipt: CommitReceipt;
+  /**
+   * Anything that went wrong after the write landed.
+   *
+   * This screen replaces the whole review, so a failure raised on the way here —
+   * telling the model what landed, for instance — has nowhere else to appear.
+   */
+  failure: string | null;
+}
+
+/**
+ * Renders what actually landed.
+ *
+ * The panel's last word, after the door has shut.
+ *
+ * @param props - Component properties.
+ * @param props.receipt - Proof of what was written.
+ * @returns The receipt screen.
+ */
+export function Receipt({ receipt, failure }: ReceiptProps) {
   return (
     <div className="review">
       <div className="tag" data-state="committed">
@@ -34,6 +54,7 @@ export function Receipt({ receipt }: { receipt: CommitReceipt }) {
         ) : null}
         {receipt.dryRun ? <p className="receipt-note">Dry run — nothing reached disk.</p> : null}
       </div>
+      {failure ? <div className="status status-error">{failure}</div> : null}
     </div>
   );
 }

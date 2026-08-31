@@ -24,7 +24,8 @@ import type { CommitReceipt, EditorState, ProposalHandle } from "../../shared/ty
  * `<repo>/bundle/server` up to `<repo>/dist/ui` — onto the real panel. That path
  * does not exist inside the shipped archive. So a server that had lost the flat
  * layout candidate would still satisfy every assertion here while the `.mcpb`
- * was broken, which is precisely the 0.2.0 bug. Testing in place cannot see it;
+ * was broken, which is the packaging defect this parameterisation exists for.
+ * Testing in place cannot see it;
  * only a copy with nothing above it can.
  */
 const PACKED_ROOT = mkdtempSync(join(tmpdir(), "interactive-editor-packed-"));
@@ -170,6 +171,25 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
       expect(content.text, "the View must not load external scripts").not.toMatch(
         /<script[^>]+src=["']http/i,
       );
+    });
+
+    /*
+     * The spec builds the sandbox CSP from what `resources/read` returns, and
+     * documents the listing entry as a fallback a server may not even publish.
+     * Metadata that exists only on the listing rides on that fallback.
+     */
+    it("carries the sandbox metadata on the content item, not only the listing", async () => {
+      // Act.
+      const read = await client.readResource({ uri: "ui://interactive-editor/panel.html" });
+      const [content] = read.contents as Array<{
+        _meta?: { ui?: { csp?: Record<string, string[]>; prefersBorder?: boolean } };
+      }>;
+
+      // Assert.
+      const ui = content._meta?.ui;
+      expect(ui, "the read item must carry _meta.ui").toBeTruthy();
+      expect(ui?.prefersBorder).toBe(true);
+      expect(ui?.csp).toEqual({ connectDomains: [], resourceDomains: [], frameDomains: [] });
     });
   });
 
@@ -365,7 +385,11 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
 
       await attach(id);
       await call("editor_commit", { proposalId: id });
-      await refusal("editor_commit", { proposalId: id }, /already been resolved/i);
+      await refusal(
+        "editor_commit",
+        { proposalId: id },
+        /was already (committed|discarded|changes-requested|superseded)/i,
+      );
     });
 
     it("does not know about proposals from a previous run", async () => {
@@ -417,17 +441,30 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
       expect(await readFile(target, "utf8")).toBe("somebody else got here first\n");
     });
 
-    it("blocks a retarget that lands outside the roots", async () => {
-      const opened = await openPanel({ path: join(root, "movable.txt"), content: "content\n" });
+    it("will not let an update move the proposal to another file", async () => {
+      // Arrange: a proposal against a file the human has been shown.
+      const target = join(root, "movable.txt");
+      const opened = await openPanel({ path: target, content: "content\n" });
       const id = opened.proposal.proposalId;
       await attach(id);
 
-      const retargeted = state(
-        await call("editor_update", { proposalId: id, path: join(root, "..", "elsewhere.txt") }),
+      // Act: ask the same proposal to point somewhere else entirely.
+      const elsewhere = join(root, "elsewhere.txt");
+      const after = state(
+        await call("editor_update", { proposalId: id, path: elsewhere, content: "moved\n" }),
       );
 
-      expect(retargeted.proposal.target.absolute).toBeNull();
-      await refusal("editor_commit", { proposalId: id }, /not a writable path|Refusing to write/);
+      /*
+       * Assert: the reviewed file and the written file must be the same file.
+       * The only human-visible decision point is the client's prompt for
+       * editor_commit, whose whole input is an opaque proposal id — so a
+       * proposal that could be re-pointed after the diff was approved would
+       * write a file nobody was shown.
+       */
+      expect(after.proposal.target.absolute).toBe(opened.proposal.target.absolute);
+      await call("editor_commit", { proposalId: id });
+      expect(await readFile(target, "utf8")).toBe("moved\n");
+      await expect(readFile(elsewhere, "utf8")).rejects.toThrow(/ENOENT/);
     });
   });
 
@@ -537,6 +574,50 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
    * claim the proposal, act, then see what the call became.
    */
   describe("the review gate", () => {
+    /*
+     * Its own server, because the grace period pulls two ways.
+     *
+     * Everywhere else it is pinned small so a test that never attaches a panel
+     * falls straight through instead of sitting out the real wait. Here a panel
+     * does attach, and it has to win a race against that same timer: claiming
+     * costs several round trips to a child process, and a grace that expires
+     * first resolves the review as unanswered before anyone can answer it.
+     * One knob, two opposite requirements.
+     */
+    let gateRoot: string;
+    let gate: Client;
+
+    beforeAll(async () => {
+      gateRoot = await mkdtemp(join(tmpdir(), "interactive-editor-gate-"));
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [
+          SERVER,
+          "--root",
+          gateRoot,
+          "--block-on-review",
+          "--review-grace-ms",
+          "10000",
+          "--review-timeout-ms",
+          "15000",
+        ],
+        stderr: "ignore",
+      });
+      gate = new Client(
+        { name: "editor-tests", version: "1.0.0" },
+        { capabilities: RENDERS_PANEL },
+      );
+      await gate.connect(transport);
+    });
+
+    afterAll(async () => {
+      await gate?.close();
+      await rm(gateRoot, { recursive: true, force: true });
+    });
+
+    const gateCall = (name: string, args: Record<string, unknown> = {}) =>
+      gate.callTool({ name, arguments: args }) as Promise<CallToolResult>;
+
     /**
      * What the panel does on mount, before any result carrying an id exists.
      * Retried, because the panel is racing the tool call that created it — the
@@ -544,7 +625,7 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
      */
     const claim = async (path: string) => {
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        const found = (await call("editor_pending", { path })) as CallToolResult;
+        const found = await gateCall("editor_pending", { path });
         const payload = found.structuredContent as unknown as EditorState | undefined;
         if (payload?.proposal) return payload.proposal.proposalId;
         await new Promise((r) => setTimeout(r, 5));
@@ -553,12 +634,12 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
     };
 
     it("commenting rejects the draft and hands the words back to the agent", async () => {
-      const target = join(root, "redraft-me.txt");
-      const opening = call("propose_write", { path: target, content: "first attempt\n" });
+      const target = join(gateRoot, "redraft-me.txt");
+      const opening = gateCall("propose_write", { path: target, content: "first attempt\n" });
 
       const id = await claim(target);
-      await attach(id);
-      await call("editor_request_changes", {
+      await gateCall("editor_attach", { proposalId: id });
+      await gateCall("editor_request_changes", {
         proposalId: id,
         message: "line 1: too terse, say why it exists",
       });
@@ -576,12 +657,15 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
     });
 
     it("accepting without comment commits, and the call returns the receipt", async () => {
-      const target = join(root, "accepted.txt");
-      const opening = call("propose_write", { path: target, content: "accepted as proposed\n" });
+      const target = join(gateRoot, "accepted.txt");
+      const opening = gateCall("propose_write", {
+        path: target,
+        content: "accepted as proposed\n",
+      });
 
       const id = await claim(target);
-      await attach(id);
-      await call("editor_commit", { proposalId: id });
+      await gateCall("editor_attach", { proposalId: id });
+      await gateCall("editor_commit", { proposalId: id });
 
       const result = await opening;
 
@@ -591,12 +675,12 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
     });
 
     it("discarding ends the call too, so nothing is left hanging", async () => {
-      const target = join(root, "thrown-away.txt");
-      const opening = call("propose_write", { path: target, content: "nope\n" });
+      const target = join(gateRoot, "thrown-away.txt");
+      const opening = gateCall("propose_write", { path: target, content: "nope\n" });
 
       const id = await claim(target);
-      await attach(id);
-      await call("editor_discard", { proposalId: id, reason: "wrong file" });
+      await gateCall("editor_attach", { proposalId: id });
+      await gateCall("editor_discard", { proposalId: id, reason: "wrong file" });
 
       const result = await opening;
 
@@ -606,15 +690,19 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
     });
 
     it("a rejected proposal cannot then be committed by a stale panel", async () => {
-      const target = join(root, "rejected-then-committed.txt");
-      const opening = call("propose_write", { path: target, content: "should never land\n" });
+      const target = join(gateRoot, "rejected-then-committed.txt");
+      const opening = gateCall("propose_write", { path: target, content: "should never land\n" });
 
       const id = await claim(target);
-      await attach(id);
-      await call("editor_request_changes", { proposalId: id, message: "no" });
+      await gateCall("editor_attach", { proposalId: id });
+      await gateCall("editor_request_changes", { proposalId: id, message: "no" });
       await opening;
 
-      await refusal("editor_commit", { proposalId: id }, /already been resolved/i);
+      const late = await gateCall("editor_commit", { proposalId: id });
+      expect(late.isError, `a stale commit should have been refused, got: ${text(late)}`).toBe(
+        true,
+      );
+      expect(text(late)).toMatch(/was already (committed|discarded|changes-requested|superseded)/i);
       await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
     });
 
@@ -633,16 +721,27 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
 
   describe("claiming a proposal from the panel", () => {
     it("says what it has open when nothing matches, rather than a bare no", async () => {
-      // "No proposal is open" is true both when the panel asked too early and
-      // when several are open and none matched the path the host handed back.
-      // Those want opposite responses, so the answer has to tell them apart.
-      await call("propose_write", { path: join(root, "claimable.txt"), content: "one\n" });
+      /*
+       * "No proposal is open" is true both when the panel asked too early and
+       * when several are open and none matched the path the host handed back.
+       * Those want opposite responses, so the answer has to tell them apart.
+       *
+       * Two proposals, because a lone one is handed over whatever path is asked
+       * for. Opening one and relying on earlier tests to have left others behind
+       * makes this pass only in a full run, and only in one order.
+       */
+      const first = join(root, "claimable-one.txt");
+      const second = join(root, "claimable-two.txt");
+      await call("propose_write", { path: first, content: "one\n" });
+      await call("propose_write", { path: second, content: "two\n" });
 
       const answer = await call("editor_pending", { path: join(root, "not-a-real-file.txt") });
       const payload = answer.structuredContent as { open: boolean; openPaths?: string[] };
 
       expect(payload.open).toBe(false);
-      expect(payload.openPaths?.length, "it must report what it does have").toBeGreaterThan(0);
+      expect(payload.openPaths, "it must report what it does have").toEqual(
+        expect.arrayContaining([first, second]),
+      );
       expect(text(answer)).toMatch(/no open proposal matches/i);
     });
 
@@ -679,6 +778,113 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
         await dryClient.close();
         await rm(dryRoot, { recursive: true, force: true });
       }
+    });
+  });
+
+  /*
+   * Every test above runs with --block-on-review, which no shipped
+   * configuration passes: neither the plugin manifest nor the `.mcpb` sets it.
+   * The default is the opposite, so without this block the mode that every
+   * install actually runs has no end-to-end coverage at all.
+   */
+  describe("the shipped default, which does not block", () => {
+    let plainRoot: string;
+    let plain: Client;
+
+    beforeAll(async () => {
+      plainRoot = await mkdtemp(join(tmpdir(), "interactive-editor-plain-"));
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [SERVER, "--root", plainRoot],
+        stderr: "ignore",
+      });
+      plain = new Client(
+        { name: "editor-tests", version: "1.0.0" },
+        { capabilities: RENDERS_PANEL },
+      );
+      await plain.connect(transport);
+    });
+
+    afterAll(async () => {
+      await plain?.close();
+      await rm(plainRoot, { recursive: true, force: true });
+    });
+
+    const plainCall = (name: string, args: Record<string, unknown> = {}) =>
+      plain.callTool({ name, arguments: args }) as Promise<CallToolResult>;
+
+    it("returns the diff promptly instead of waiting for a human", async () => {
+      // Arrange.
+      const started = Date.now();
+
+      // Act.
+      const opened = await plainCall("propose_write", {
+        path: join(plainRoot, "prompt.txt"),
+        content: "hello\n",
+      });
+
+      // Assert: the wait is opt-in, so this must not sit out any grace period.
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(text(opened)).toMatch(/Editor open/);
+      expect(opened.isError).toBeFalsy();
+    });
+
+    it("describes itself to the model as non-blocking", async () => {
+      // Assert: a description promising to wait, on a server that returns
+      // immediately, tells the model its next observation is a verdict when it
+      // is a diff.
+      const { tools } = await plain.listTools();
+      const description = tools.find((t) => t.name === "propose_write")?.description ?? "";
+
+      expect(description).toMatch(/returns as soon as the panel is open/i);
+      expect(description).not.toMatch(/does not return until/i);
+    });
+
+    it("reports that comments had nowhere to go, rather than claiming delivery", async () => {
+      // Arrange.
+      const opened = await plainCall("propose_write", {
+        path: join(plainRoot, "commented.txt"),
+        content: "draft\n",
+      });
+      const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+      await plainCall("editor_attach", { proposalId: id });
+
+      // Act.
+      const sent = await plainCall("editor_request_changes", {
+        proposalId: id,
+        message: "not like that",
+      });
+
+      /*
+       * Assert: nothing was waiting on the review, so the panel has to be told
+       * to deliver the words itself. Claiming delivery here loses them.
+       */
+      expect((sent.structuredContent as { delivered?: boolean }).delivered).toBe(false);
+      await expect(readFile(join(plainRoot, "commented.txt"), "utf8")).rejects.toThrow(/ENOENT/);
+    });
+
+    it("still refuses a commit that no panel ever attached to", async () => {
+      // Arrange.
+      const opened = await plainCall("propose_write", {
+        path: join(plainRoot, "unattached.txt"),
+        content: "should not land\n",
+      });
+      const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+
+      // Act.
+      const result = await plainCall("editor_commit", { proposalId: id });
+
+      // Assert.
+      expect(result.isError).toBe(true);
+      expect(text(result)).toMatch(/never opened in the editor/i);
+    });
+
+    it("reports its own version, so an install can be confirmed", async () => {
+      // Assert: without this there is no way to tell which build is answering.
+      const roots = await plainCall("list_roots");
+      const reported = roots.structuredContent as { serverVersion?: string };
+      expect(reported.serverVersion).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(reported).toMatchObject({ rendersPanel: true, blockOnReview: false });
     });
   });
 });
