@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-31
+
+### Security
+
+- **A commit is now gated on the host, not on a flag the agent can set.**
+  `visibility: ["app"]` is a request to the host, not a guarantee: a host with no
+  MCP Apps support hands the agent every tool, `editor_attach` among them, so the
+  agent could mark its own proposal attached and walk through. Verified live —
+  `editor_attach` called by a model returned `attached: true`. `commit()` now
+  asks the one thing an agent cannot author: whether its own client declared
+  support for `text/html;profile=mcp-app` at initialize. No panel support, no
+  write. `--terminal-approval` remains the documented, weaker opt-out.
+- The README claimed the editor "can never attach, so nothing can be committed."
+  The first half was false and the second was only holding because nothing had
+  tried it. Corrected to describe the real mechanism.
+
 ### Changed
 
 - The editor-opening tools — `propose_write`, `propose_delete`, `open_file` —
@@ -87,5 +103,6 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/skurekjakub/mcp-interactive-editor/releases/tag/v0.1.0
