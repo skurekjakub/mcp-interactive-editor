@@ -1,10 +1,27 @@
 /**
+ * @module
+ *
  * Types shared between the MCP server (Node) and the panel (browser).
+ *
  * Dependency-free so both build targets can consume it.
  */
 
+/** What a proposal intends to do to the file it names. */
 export type WriteMode = "create" | "overwrite" | "delete";
 
+/**
+ * Why a requested path cannot be written.
+ *
+ * Every rejection carries one of these so the refusal can name the check that
+ * failed. Collapsing them loses the difference between a path outside the roots
+ * and one inside a root that the deny list caught, and the second reported as
+ * the first is undebuggable: it tells a human their own file is outside their
+ * own project, directly above the root that contains it.
+ */
+export type PathRejection =
+  "outside-roots" | "denied" | "unresolvable" | "not-a-file" | "too-large";
+
+/** A resolved write target, or the reason it cannot be one. */
 export interface TargetInfo {
   /** Path as the model wrote it, before normalisation. */
   requested: string;
@@ -15,12 +32,25 @@ export interface TargetInfo {
   /** The configured root this path falls under, if any. */
   root: string | null;
   exists: boolean;
-  /** Size and hash of what is on disk right now, when it exists. */
-  onDisk?: { bytes: number; lines: number; sha256: string; mtimeMs: number };
+  /** Which check refused the path. Set whenever `absolute` is null. */
+  rejection?: PathRejection;
+  /** The denied pattern that matched, when `rejection` is `denied`. */
+  deniedBy?: string;
+  /** Size, hash and permissions of what is on disk right now, when it exists. */
+  onDisk?: {
+    bytes: number;
+    lines: number;
+    sha256: string;
+    mtimeMs: number;
+    /** POSIX mode, carried so a commit can restore it rather than reset it. */
+    mode: number;
+  };
 }
 
+/** How much a finding should interrupt the human. */
 export type FindingSeverity = "blocker" | "warning" | "info";
 
+/** One thing worth saying about a proposal before it lands. */
 export interface Finding {
   id: string;
   rule: string;
@@ -33,6 +63,10 @@ export interface Finding {
   fix?: { label: string; content: string };
 }
 
+/** How a proposal stopped being open. */
+export type Resolution = "committed" | "discarded" | "changes-requested" | "superseded";
+
+/** A pending write, from the moment it is proposed until it resolves. */
 export interface Proposal {
   proposalId: string;
   mode: WriteMode;
@@ -45,11 +79,16 @@ export interface Proposal {
   baseline: string;
   /** Why the model wants this write. Shown above the editor. */
   rationale?: string;
-  /** Set by the app-only attach tool. `commit_write` refuses without it. */
+  /** Set by the app-only attach tool. `editor_commit` refuses without it. */
   attached: boolean;
   /** Human ticked the box for a destructive write. */
   destructiveAcknowledged: boolean;
-  committedAt?: string;
+  /** When the proposal stopped being open, in ISO 8601. */
+  resolvedAt?: string;
+  /** How it stopped being open. A discarded proposal must not report as committed. */
+  resolution?: Resolution;
+  /** When the proposal was created, for eviction. */
+  createdAt: number;
 }
 
 /** Everything the View needs for a first paint, returned as `structuredContent`. */
@@ -74,8 +113,8 @@ export interface EditorState {
  * What an editor-opening tool returns instead of an `EditorState`.
  *
  * `structuredContent` has two readers: the View paints from it, and the host
- * also hands it to the model. So anything in here is paid for in context on
- * every proposal — which is why this is a claim ticket and not the file. The
+ * also hands it to the model. Anything in here is therefore paid for in context
+ * on every proposal, which is why it is a claim ticket rather than the file. The
  * View redeems it for the full state through `editor_attach`, a call it already
  * makes on mount.
  */
@@ -86,16 +125,18 @@ export interface ProposalHandle {
   mode: WriteMode;
   /** Set when the path was refused, so the panel can say so before it attaches. */
   refused?: boolean;
+  /** Which check refused the path, when it was refused. */
+  rejection?: PathRejection;
 }
 
 /**
  * How a review ended.
  *
- * The editor is a gate, not a viewer, so the tool call that opened it does not
- * return until one of these happens. Comments and a commit are deliberately
- * exclusive: saying something about a draft is the same as declining it, and the
- * agent is told to redraft rather than being told the write went through with
- * remarks attached to it.
+ * The editor is a gate rather than a viewer, so under `--block-on-review` the
+ * tool call that opened it does not return until one of these happens. Comments
+ * and a commit are deliberately exclusive: saying something about a draft is the
+ * same as declining it, and the agent is told to redraft rather than being told
+ * the write went through with remarks attached.
  */
 export type ReviewOutcome =
   | { kind: "committed"; receipt: CommitReceipt }
@@ -104,8 +145,10 @@ export type ReviewOutcome =
   /** The panel never answered — no host to render it, or nobody came back. */
   | { kind: "unanswered"; why: string };
 
+/** Which side of a diff a line belongs to. */
 export type DiffLineKind = "equal" | "add" | "remove";
 
+/** One line of a rendered diff, numbered against both files. */
 export interface DiffLine {
   kind: DiffLineKind;
   oldLine: number | null;
@@ -113,19 +156,36 @@ export interface DiffLine {
   text: string;
 }
 
+/** A run of changed lines with enough context to read it. */
 export interface DiffHunk {
   oldStart: number;
   newStart: number;
   lines: DiffLine[];
 }
 
+/** How much a proposal changes, in lines. */
 export interface DiffStats {
   added: number;
   removed: number;
   /** Set when the files were too large to diff line by line. */
   truncated?: boolean;
+  /**
+   * Set when only the trailing newline differs.
+   *
+   * Such a change alters the bytes on disk without altering any line, so the
+   * hunks are empty and the panel would otherwise report no changes at all.
+   */
+  newlineAtEofChanged?: boolean;
 }
 
+/**
+ * Proof of what landed, returned by the commit tool.
+ *
+ * `content` is present for the panel, which uses it to tell the model what a
+ * human actually saved when that differs from what was proposed. It is stripped
+ * before the receipt travels back through a blocking opener, because the file
+ * body has no business entering the model's context a second time.
+ */
 export interface CommitReceipt {
   ok: boolean;
   path: string;
@@ -137,5 +197,5 @@ export interface CommitReceipt {
   dryRun: boolean;
   /** True when the human changed the model's proposal before committing. */
   editedByHuman: boolean;
-  content: string;
+  content?: string;
 }

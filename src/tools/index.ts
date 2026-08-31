@@ -20,20 +20,13 @@ export type { ToolContext } from "./context.js";
 export { VIEW_URI } from "./context.js";
 
 /**
- * Two sets of tools, and the split is the entire security model.
+ * Settings that decide who may call the writing tools.
  *
- * `visibility: ["model"]` tools can be called by the agent. None of them touch
- * disk — the most they do is open a review panel and read files inside the roots.
- *
- * `visibility: ["app"]` tools are the ones that write, and the host is required
- * by the MCP Apps spec to keep them out of the agent's tool list entirely and to
- * reject any call the agent makes for them. So the model cannot commit a write
- * even if it decides it wants to: the only caller that exists is the View, and
- * the View only calls on a click.
- *
- * One module per tool, and the grouping below is the only place that says which
- * side of the line a tool falls on. Adding a tool is a new file and a new line
- * in the right group here.
+ * The `model`/`app` visibility split is the entire security model. Model-visible
+ * tools never touch disk; they open a review panel and read inside the roots.
+ * App-only tools are the ones that write, and the MCP Apps spec requires the
+ * host to keep them out of the agent's tool list and to reject any call the
+ * agent makes for them, so the only caller that exists is the View.
  */
 export interface ToolOptions {
   /**
@@ -55,6 +48,16 @@ export interface ToolOptions {
   blockOnReview?: boolean;
 }
 
+/**
+ * Registers every tool, on the correct side of the visibility split.
+ *
+ * The grouping below is the only place that records which side a tool falls on,
+ * so adding a tool means a new module and a new line in the right group.
+ *
+ * @param server - The MCP server to register against.
+ * @param guard - Filesystem guard enforcing root containment for every path.
+ * @param options - Who may commit, and how long opening calls wait.
+ */
 export function registerTools(
   server: McpServer,
   guard: FsGuard,
@@ -91,16 +94,25 @@ export function registerTools(
 }
 
 /**
- * Does the connected host actually render MCP Apps?
+ * Reports whether the connected host renders MCP Apps.
  *
  * `visibility: ["app"]` is a request to the host, not a guarantee — a host that
  * does not implement MCP Apps hands every tool to the agent, `editor_attach`
- * included, and then the agent can mark its own proposal as reviewed. The
- * client's declared capabilities are the one part of this the agent does not
- * get to author, so that is what the commit path asks.
+ * included, and the agent can then mark its own proposal as reviewed. A client's
+ * declared capabilities are the one input the agent does not get to author, so
+ * that is what the commit path asks.
+ *
+ * MCP Apps § Client Capabilities marks `mimeTypes` REQUIRED, and
+ * `getUiCapability` performs no validation of its own. An absent list is
+ * therefore a malformed declaration, not a permissive one: treating it as
+ * support would let `extensions: {"io.modelcontextprotocol/ui": {}}` open the
+ * commit path on a host that renders nothing.
+ *
+ * @param server - The server whose connected client is being questioned.
+ * @returns True only when the client declared the App resource mime type.
+ * @gate Carries the "nobody commits what nobody saw" invariant.
  */
 function hostRendersPanel(server: McpServer): boolean {
   const ui = getUiCapability(server.server.getClientCapabilities());
-  if (!ui) return false;
-  return ui.mimeTypes === undefined || ui.mimeTypes.includes(RESOURCE_MIME_TYPE);
+  return ui?.mimeTypes?.includes(RESOURCE_MIME_TYPE) === true;
 }

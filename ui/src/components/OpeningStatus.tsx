@@ -1,5 +1,6 @@
 import type { ProposalSession } from "../hooks/useProposalSession.js";
 
+/** Properties of the pre-proposal status screen. */
 interface OpeningStatusProps {
   display: string | undefined;
   phase: ProposalSession["phase"];
@@ -7,7 +8,7 @@ interface OpeningStatusProps {
 }
 
 /**
- * What the panel shows before it has a proposal.
+ * Renders what the panel shows before it has a proposal.
  *
  * This was three lines inline in `App`, and one of them was a bug: it rendered
  * "Opening …" and never read `failure`, so a claim that failed looked exactly
@@ -24,6 +25,12 @@ export function OpeningStatus({ display, phase, failure }: OpeningStatusProps) {
   );
 }
 
+/**
+ * Names the step the panel is waiting on.
+ *
+ * @param phase - Where the session has got to.
+ * @returns A phrase for the reader.
+ */
 function describePhase(phase: ProposalSession["phase"]): string {
   switch (phase) {
     case "connecting":

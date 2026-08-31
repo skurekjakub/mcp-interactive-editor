@@ -7,6 +7,7 @@ import { DEFAULT_DENY, FsGuard } from "./fsGuard.js";
 import { registerTools } from "./tools/index.js";
 import { SERVER_VERSION } from "./version.js";
 
+/** Everything the command line can decide. */
 interface Cli {
   roots: string[];
   deny: string[];
@@ -17,12 +18,65 @@ interface Cli {
   blockOnReview: boolean;
 }
 
-/** MCPB bundles cannot add a flag conditionally, so dry run is also an env var. */
+/**
+ * Reads the dry-run setting from the environment.
+ *
+ * MCPB bundles cannot add a flag conditionally, so dry run is also an env var.
+ *
+ * @returns True when the environment asks for a dry run.
+ */
 function dryRunFromEnv(): boolean {
   const raw = process.env.INTERACTIVE_EDITOR_DRY_RUN?.trim().toLowerCase();
   return raw === "true" || raw === "1" || raw === "yes";
 }
 
+/**
+ * Reads a positive-integer flag value.
+ *
+ * An unvalidated `Number()` turns a typo into `NaN`, and every comparison
+ * against `NaN` is false — so a mistyped timing flag disables the wait it was
+ * meant to configure and reports the timeout as "within NaN minutes".
+ *
+ * @param flag - The flag name, for the error message.
+ * @param raw - The argument that followed it, if any.
+ * @returns The parsed number.
+ * @throws {Error} When the value is missing, not a number, or not positive.
+ */
+function positiveInt(flag: string, raw: string | undefined): number {
+  const value = Number(raw);
+  if (raw === undefined || raw === "" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${flag} needs a positive number of milliseconds, got ${raw ?? "nothing"}`);
+  }
+  return value;
+}
+
+/**
+ * Reads the value attached to a `--flag=value` argument.
+ *
+ * An empty value is refused rather than accepted. `--root=` would otherwise
+ * resolve to the working directory and silently make it writable, which is
+ * exactly what an operator writing `--root="$PROJECT_DIR"` with an unset
+ * variable must not get; `--deny=` would put the empty string in the deny list
+ * and refuse every path in the roots.
+ *
+ * @param flag - The flag name, for the error message.
+ * @param arg - The whole argument, including its `=`.
+ * @returns The value after the `=`.
+ * @throws {Error} When the value is empty.
+ */
+function inlineValue(flag: string, arg: string): string {
+  const value = arg.slice(flag.length + 1);
+  if (value.trim() === "") throw new Error(`${flag} needs a value`);
+  return value;
+}
+
+/**
+ * Parses the command line.
+ *
+ * @param argv - Arguments, excluding the node binary and script path.
+ * @returns The parsed settings.
+ * @throws {Error} When a flag is unknown or its value is unusable.
+ */
 function parseArgs(argv: string[]): Cli {
   const cli: Cli = {
     roots: [],
@@ -42,23 +96,30 @@ function parseArgs(argv: string[]): Cli {
     } else if (arg === "--terminal-approval") {
       cli.terminalApproval = true;
     } else if (arg === "--review-timeout-ms") {
-      cli.reviewTimeoutMs = Number(argv[++i]);
+      cli.reviewTimeoutMs = positiveInt(arg, argv[++i]);
+    } else if (arg.startsWith("--review-timeout-ms=")) {
+      cli.reviewTimeoutMs = positiveInt(
+        "--review-timeout-ms",
+        inlineValue("--review-timeout-ms", arg),
+      );
     } else if (arg === "--block-on-review") {
       cli.blockOnReview = true;
     } else if (arg === "--review-grace-ms") {
-      cli.reviewGraceMs = Number(argv[++i]);
+      cli.reviewGraceMs = positiveInt(arg, argv[++i]);
+    } else if (arg.startsWith("--review-grace-ms=")) {
+      cli.reviewGraceMs = positiveInt("--review-grace-ms", inlineValue("--review-grace-ms", arg));
     } else if (arg === "--root") {
       const value = argv[++i];
       if (!value) throw new Error("--root needs a directory");
       cli.roots.push(expandHome(value));
     } else if (arg.startsWith("--root=")) {
-      cli.roots.push(expandHome(arg.slice("--root=".length)));
+      cli.roots.push(expandHome(inlineValue("--root", arg)));
     } else if (arg === "--deny") {
       const value = argv[++i];
       if (!value) throw new Error("--deny needs a pattern");
       cli.deny.push(value);
     } else if (arg.startsWith("--deny=")) {
-      cli.deny.push(arg.slice("--deny=".length));
+      cli.deny.push(inlineValue("--deny", arg));
     } else if (arg === "--allow-everything-in-roots") {
       cli.deny = [];
     } else if (arg === "--dry-run") {
@@ -76,6 +137,12 @@ function parseArgs(argv: string[]): Cli {
   return cli;
 }
 
+/**
+ * Expands a leading `~` and resolves the path.
+ *
+ * @param p - A path, possibly relative or home-relative.
+ * @returns The absolute path.
+ */
 function expandHome(p: string): string {
   return p.startsWith("~") ? resolve(homedir(), p.slice(1).replace(/^[/\\]/, "")) : resolve(p);
 }
@@ -107,6 +174,11 @@ Every write goes through a View the human edits and approves. The agent can open
 the editor; only a click can walk through it.
 `;
 
+/**
+ * Starts the server on stdio.
+ *
+ * @returns A promise that settles when the transport closes.
+ */
 async function main(): Promise<void> {
   let cli: Cli;
   try {

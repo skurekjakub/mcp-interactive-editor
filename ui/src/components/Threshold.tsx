@@ -1,5 +1,6 @@
 import type { Finding } from "../../../shared/types.js";
 
+/** Properties of the commit threshold. */
 interface ThresholdProps {
   findings: Finding[];
   ack: boolean;
@@ -22,8 +23,14 @@ interface ThresholdProps {
 }
 
 /**
- * The one-way door. Everything above it is reversible; this is the line, so it
- * says what is stopping you when something is, and nothing when nothing is.
+ * Renders the one-way door.
+ *
+ * Everything above it is reversible; this is the line. It says what is stopping
+ * the write when something is, and nothing when nothing is.
+ *
+ * @param props - Component properties.
+ * @param props.blocked - Whether a finding forbids the write outright.
+ * @returns The acknowledgement row and the two actions.
  */
 export function Threshold({
   findings,

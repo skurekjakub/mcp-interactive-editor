@@ -7,6 +7,12 @@ import { commit } from "./commit.js";
 import { resolveReview } from "../review.js";
 import { describeReceipt } from "./results.js";
 
+/**
+ * Registers the tool that writes an approved proposal to disk.
+ *
+ * @param server - The MCP server to register against.
+ * @param context - Guard, visibility settings and the host capability probe.
+ */
 export function registerEditorCommit(server: McpServer, context: ToolContext): void {
   registerAppTool(
     server,

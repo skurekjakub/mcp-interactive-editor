@@ -2,10 +2,16 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
-import { getProposal, updateProposal } from "../proposals.js";
+import { getProposal, resolveProposal } from "../proposals.js";
 import { resolveReview } from "../review.js";
 import type { ToolContext } from "./context.js";
 
+/**
+ * Registers the tool the panel calls when the human comments instead of saving.
+ *
+ * @param server - The MCP server to register against.
+ * @param _context - Unused; requesting changes touches no files.
+ */
 export function registerEditorRequestChanges(server: McpServer, _context: ToolContext): void {
   registerAppTool(
     server,
@@ -26,13 +32,13 @@ export function registerEditorRequestChanges(server: McpServer, _context: ToolCo
       /*
        * Commenting is declining. There is no path where a draft lands *and*
        * carries remarks: an agent told "written, and here are some notes" treats
-       * the work as finished, which is exactly the wrong reading of someone
-       * taking the time to say what is wrong with it.
+       * the work as finished, which is the wrong reading of someone taking the
+       * time to say what is wrong with it.
        *
-       * Marking it resolved also closes the door behind us, so a stale panel
-       * cannot come back and commit the content that was just rejected.
+       * Resolving also closes the door behind it, so a stale panel cannot come
+       * back and commit content that was just rejected.
        */
-      updateProposal(proposalId, { committedAt: new Date().toISOString() });
+      resolveProposal(proposalId, "changes-requested");
       const waited = resolveReview(proposalId, { kind: "changes-requested", message });
 
       return {

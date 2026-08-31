@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EditorState, Finding, Proposal } from "../../shared/types.js";
+import type { EditorState, Finding, PathRejection, Proposal } from "../../shared/types.js";
 import { diffLines } from "../../shared/diff.js";
 import {
   MODEL_DIFF_LINE_BUDGET,
@@ -11,7 +11,13 @@ import {
 function stateFor(
   baseline: string,
   content: string,
-  over: { absolute?: string | null; findings?: Finding[]; dryRun?: boolean } = {},
+  over: {
+    absolute?: string | null;
+    rejection?: PathRejection;
+    deniedBy?: string;
+    findings?: Finding[];
+    dryRun?: boolean;
+  } = {},
 ): EditorState {
   const proposal: Proposal = {
     proposalId: "11111111-2222-3333-4444-555555555555",
@@ -22,12 +28,15 @@ function stateFor(
       display: "file.txt",
       root: "/root",
       exists: true,
+      ...(over.rejection ? { rejection: over.rejection } : {}),
+      ...(over.deniedBy ? { deniedBy: over.deniedBy } : {}),
     },
     content,
     originalContent: content,
     baseline,
     attached: false,
     destructiveAcknowledged: false,
+    createdAt: 0,
   };
 
   return {
@@ -97,9 +106,28 @@ describe("describeState", () => {
   });
 
   it("explains a refusal with the roots, instead of a diff", () => {
-    const text = describeState(stateFor("", "x", { absolute: null }));
+    const text = describeState(stateFor("", "x", { absolute: null, rejection: "outside-roots" }));
     expect(text).toMatch(/outside the roots/);
     expect(text).toContain("/root");
     expect(text).not.toContain("@@");
+  });
+
+  /*
+   * A file inside a root that the deny list caught is not outside the roots, and
+   * saying so prints "is outside the roots" directly above the root containing
+   * it. There is no way to debug that from the message.
+   */
+  it("names the deny pattern rather than blaming the roots", () => {
+    const text = describeState(
+      stateFor("", "x", { absolute: null, rejection: "denied", deniedBy: ".env" }),
+    );
+    expect(text).toMatch(/deny list/);
+    expect(text).toContain(".env");
+    expect(text).not.toMatch(/outside the roots/);
+  });
+
+  it("says a directory is a directory", () => {
+    const text = describeState(stateFor("", "x", { absolute: null, rejection: "not-a-file" }));
+    expect(text).toMatch(/is a directory/);
   });
 });

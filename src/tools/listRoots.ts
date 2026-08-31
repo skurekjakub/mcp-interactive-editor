@@ -1,7 +1,18 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
+import { SERVER_VERSION } from "../version.js";
 import type { ToolContext } from "./context.js";
 
+/**
+ * Registers the diagnostic tool that reports roots and host capability.
+ *
+ * The version is included because two installs of this editor — a `.mcpb`
+ * extension and a plugin — update on separate cycles, and there is otherwise no
+ * way to confirm which build is answering.
+ *
+ * @param server - The MCP server to register against.
+ * @param context - Guard and the host capability probe.
+ */
 export function registerListRoots(server: McpServer, context: ToolContext): void {
   const { guard } = context;
 
@@ -36,15 +47,18 @@ export function registerListRoots(server: McpServer, context: ToolContext): void
           {
             type: "text",
             text:
+              `mcp-interactive-editor ${SERVER_VERSION}\n\n` +
               `Writable roots:\n${guard.roots.map((r) => `  ${r}`).join("\n")}\n\n${verdict}` +
               (guard.dryRun ? "\n\nDRY RUN: commits are simulated, nothing reaches disk." : ""),
           },
         ],
         structuredContent: {
+          serverVersion: SERVER_VERSION,
           roots: guard.roots,
           dryRun: guard.dryRun,
           rendersPanel,
           terminalApproval: context.terminalApproval,
+          blockOnReview: context.blockOnReview,
         },
       };
     },

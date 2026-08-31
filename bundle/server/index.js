@@ -28557,10 +28557,151 @@ var StdioServerTransport = class {
 };
 
 // src/fsGuard.ts
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile
+} from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+// shared/diff.ts
+var LCS_LINE_BUDGET = 1500;
+var CONTEXT_LINES = 3;
+function splitLines(text) {
+  if (text === "") return [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+function countLines(text) {
+  return splitLines(text).length;
+}
+function endsWithNewline(text) {
+  return text.endsWith("\n");
+}
+function diffLines(before, after) {
+  const a = splitLines(before);
+  const b = splitLines(after);
+  let prefix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) {
+    suffix += 1;
+  }
+  const midA = a.slice(prefix, a.length - suffix);
+  const midB = b.slice(prefix, b.length - suffix);
+  const truncated = midA.length > LCS_LINE_BUDGET && midB.length > LCS_LINE_BUDGET;
+  const middle = truncated ? wholesaleReplace(midA, midB, prefix) : lcsDiff(midA, midB, prefix);
+  const lines = [
+    ...a.slice(0, prefix).map((text, i) => line("equal", i + 1, i + 1, text)),
+    ...middle,
+    ...a.slice(a.length - suffix).map((text, i) => line("equal", a.length - suffix + i + 1, b.length - suffix + i + 1, text))
+  ];
+  const newlineChanged = before !== "" && after !== "" && endsWithNewline(before) !== endsWithNewline(after);
+  const stats = {
+    added: lines.filter((l) => l.kind === "add").length,
+    removed: lines.filter((l) => l.kind === "remove").length,
+    ...truncated ? { truncated: true } : {},
+    ...newlineChanged ? { newlineAtEofChanged: true } : {}
+  };
+  return { hunks: toHunks(lines), stats };
+}
+function line(kind, oldLine, newLine, text) {
+  return { kind, oldLine, newLine, text };
+}
+function wholesaleReplace(a, b, offset) {
+  return [
+    ...a.map((text, i) => line("remove", offset + i + 1, null, text)),
+    ...b.map((text, i) => line("add", null, offset + i + 1, text))
+  ];
+}
+function lcsDiff(a, b, offset) {
+  const n = a.length;
+  const m2 = b.length;
+  const table = new Uint32Array((n + 1) * (m2 + 1));
+  const at = (i2, j3) => i2 * (m2 + 1) + j3;
+  for (let i2 = n - 1; i2 >= 0; i2 -= 1) {
+    for (let j3 = m2 - 1; j3 >= 0; j3 -= 1) {
+      table[at(i2, j3)] = a[i2] === b[j3] ? table[at(i2 + 1, j3 + 1)] + 1 : Math.max(table[at(i2 + 1, j3)], table[at(i2, j3 + 1)]);
+    }
+  }
+  const out = [];
+  let i = 0;
+  let j2 = 0;
+  while (i < n && j2 < m2) {
+    if (a[i] === b[j2]) {
+      out.push(line("equal", offset + i + 1, offset + j2 + 1, a[i]));
+      i += 1;
+      j2 += 1;
+    } else if (table[at(i + 1, j2)] >= table[at(i, j2 + 1)]) {
+      out.push(line("remove", offset + i + 1, null, a[i]));
+      i += 1;
+    } else {
+      out.push(line("add", null, offset + j2 + 1, b[j2]));
+      j2 += 1;
+    }
+  }
+  while (i < n) {
+    out.push(line("remove", offset + i + 1, null, a[i]));
+    i += 1;
+  }
+  while (j2 < m2) {
+    out.push(line("add", null, offset + j2 + 1, b[j2]));
+    j2 += 1;
+  }
+  return out;
+}
+function toHunks(lines) {
+  const changed = lines.map((l, i) => l.kind === "equal" ? -1 : i).filter((i) => i !== -1);
+  if (changed.length === 0) return [];
+  const ranges = [];
+  for (const index of changed) {
+    const start = Math.max(0, index - CONTEXT_LINES);
+    const end = Math.min(lines.length - 1, index + CONTEXT_LINES);
+    const last = ranges[ranges.length - 1];
+    if (last && start <= last[1] + 1) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      ranges.push([start, end]);
+    }
+  }
+  return ranges.map(([start, end]) => {
+    const slice = lines.slice(start, end + 1);
+    return {
+      oldStart: slice.find((l) => l.oldLine !== null)?.oldLine ?? 0,
+      newStart: slice.find((l) => l.newLine !== null)?.newLine ?? 0,
+      lines: slice
+    };
+  });
+}
+function formatUnifiedDiff(hunks, label, eof) {
+  if (hunks.length === 0) return `(no changes to ${label})`;
+  const out = [`--- ${label} (on disk)`, `+++ ${label} (proposed)`];
+  hunks.forEach((hunk, hunkIndex) => {
+    const oldCount = hunk.lines.filter((l) => l.kind !== "add").length;
+    const newCount = hunk.lines.filter((l) => l.kind !== "remove").length;
+    out.push(`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`);
+    hunk.lines.forEach((entry, lineIndex) => {
+      const marker = entry.kind === "add" ? "+" : entry.kind === "remove" ? "-" : " ";
+      out.push(marker + entry.text);
+      const lastOfAll = hunkIndex === hunks.length - 1 && lineIndex === hunk.lines.length - 1;
+      if (!lastOfAll || !eof) return;
+      const unterminated = entry.kind === "remove" ? !eof.before : !eof.after;
+      if (unterminated) out.push("\\ No newline at end of file");
+    });
+  });
+  return out.join("\n");
+}
+
+// src/fsGuard.ts
 var DEFAULT_DENY = [
   ".git/",
   "node_modules/",
@@ -28575,6 +28716,7 @@ var DEFAULT_DENY = [
   ".aws/",
   ".npmrc"
 ];
+var MAX_FILE_BYTES = 4 * 1024 * 1024;
 var PathRejected = class extends Error {
   constructor(message, reason) {
     super(message);
@@ -28598,78 +28740,86 @@ var FsGuard = class {
     this.dryRun = options.dryRun;
   }
   /**
-   * Roots have to be canonicalised the same way targets are, or containment
-   * compares two different spellings of the same directory and refuses
-   * everything. Two real cases: Windows hands out 8.3 short paths for temp
-   * directories (`RUNNER~1`) that `realpath` expands, and macOS resolves `/tmp`
-   * and `/var` into `/private`. Configure a root by either spelling and every
-   * write would be rejected as "outside the roots".
+   * Resolves the configured roots to their canonical spellings.
    *
-   * Resolved once, lazily, because the constructor cannot await. A root that
-   * does not exist keeps its configured form — it simply will not match
-   * anything until it does.
+   * Roots have to be canonicalised the same way targets are, or containment
+   * compares two different spellings of one directory and refuses everything.
+   * Windows hands out 8.3 short paths for temp directories that `realpath`
+   * expands, and macOS resolves `/tmp` and `/var` into `/private`.
+   *
+   * @returns The canonical root paths.
    */
   async resolveRoots() {
-    if (!this.canonicalRoots) {
-      this.canonicalRoots = await Promise.all(
-        this.roots.map(async (root) => {
-          try {
-            return await realpath(root);
-          } catch {
-            return root;
-          }
-        })
-      );
-    }
-    return this.canonicalRoots;
+    if (this.canonicalRoots) return this.canonicalRoots;
+    let complete = true;
+    const resolved = await Promise.all(
+      this.roots.map(async (root) => {
+        try {
+          return await realpath(root);
+        } catch {
+          complete = false;
+          return root;
+        }
+      })
+    );
+    if (complete) this.canonicalRoots = resolved;
+    return resolved;
   }
   /**
-   * Resolve a requested path against the roots.
+   * Resolves a requested path against the roots.
    *
    * Symlinks are resolved on the deepest existing ancestor, so a link planted
-   * inside a root that points outside it cannot be used to escape. A path that
-   * fails any check comes back with `absolute: null` rather than throwing,
-   * because the View needs to render the rejection, not crash on it.
+   * inside a root pointing outside it cannot be used to escape.
+   *
+   * Every failure returns `absolute: null` with a `rejection` naming the check
+   * that refused it, rather than throwing. The View renders the refusal, and a
+   * caller that cannot tell "outside the roots" from "matched the deny list"
+   * reports a file inside the project as being outside it.
+   *
+   * @param requested - Path as the model supplied it, absolute or root-relative.
+   * @returns The resolved target, or a rejection naming the failed check.
    */
   async describe(requested) {
-    const rejected = () => ({
+    const rejected = (reason, deniedBy2) => ({
       requested,
       absolute: null,
       display: requested,
       root: null,
-      exists: false
+      exists: false,
+      rejection: reason,
+      ...deniedBy2 ? { deniedBy: deniedBy2 } : {}
     });
-    if (requested.trim() === "") return rejected();
+    if (requested.trim() === "") return rejected("unresolvable");
     const roots = await this.resolveRoots();
     const candidate = isAbsolute(requested) ? resolve(requested) : resolve(roots[0], requested);
     let real;
     try {
       real = await realpathDeepest(candidate);
     } catch {
-      return rejected();
+      return rejected("unresolvable");
     }
     const root = roots.find((r2) => contains(r2, real)) ?? null;
-    if (!root) return rejected();
+    if (!root) return rejected("outside-roots");
     const rel = relative(root, real);
-    if (this.isDenied(rel)) return rejected();
+    const deniedBy = this.deniedBy(rel);
+    if (deniedBy) return rejected("denied", deniedBy);
     let exists = false;
     let onDisk;
     try {
       const info = await stat(real);
-      if (info.isDirectory()) {
-        throw new PathRejected(`${requested} is a directory.`, "not-a-file");
-      }
+      if (info.isDirectory()) return rejected("not-a-file");
+      if (info.size > MAX_FILE_BYTES) return rejected("too-large");
       const body = await readFile(real, "utf8");
       exists = true;
       onDisk = {
         bytes: info.size,
-        lines: body === "" ? 0 : body.split("\n").length,
+        lines: countLines(body),
         sha256: sha256(body),
-        mtimeMs: info.mtimeMs
+        mtimeMs: info.mtimeMs,
+        mode: info.mode
       };
     } catch (error40) {
-      if (error40 instanceof PathRejected) throw error40;
-      if (error40.code !== "ENOENT") return rejected();
+      if (error40.code !== "ENOENT") return rejected("unresolvable");
     }
     return {
       requested,
@@ -28680,34 +28830,80 @@ var FsGuard = class {
       onDisk
     };
   }
-  isDenied(relativePath) {
+  /**
+   * Reports which deny pattern refuses a path, if any.
+   *
+   * @param relativePath - Path relative to the root that contains it.
+   * @returns The matching pattern, or null when nothing matched.
+   */
+  deniedBy(relativePath) {
     const normalised = toPosix(relativePath).toLowerCase();
-    if (normalised.startsWith("../")) return true;
-    return this.deny.some(
-      (needle) => needle.endsWith("/") ? normalised.startsWith(needle) || normalised.includes(`/${needle}`) : normalised.includes(needle)
-    );
+    if (normalised.startsWith("../")) return "..";
+    const segments = normalised.split("/");
+    const name = segments[segments.length - 1] ?? "";
+    const directories = segments.slice(0, -1);
+    for (const pattern of this.deny) {
+      if (pattern === "") continue;
+      if (pattern.endsWith("/")) {
+        if (directories.includes(pattern.slice(0, -1))) return pattern;
+        continue;
+      }
+      if (pattern.startsWith(".")) {
+        if (name === pattern || name.startsWith(`${pattern}.`) || name.endsWith(pattern)) {
+          return pattern;
+        }
+        continue;
+      }
+      if (name === pattern || name.startsWith(`${pattern}.`)) return pattern;
+    }
+    return null;
   }
+  /**
+   * Reads a file inside the roots.
+   *
+   * @param absolute - An already-resolved path.
+   * @returns The file contents, or the empty string when it does not exist.
+   * @throws {PathRejected} When the file exists but cannot be read, or exceeds
+   *   {@link MAX_FILE_BYTES}.
+   */
   async read(absolute) {
     try {
+      const info = await stat(absolute);
+      if (info.size > MAX_FILE_BYTES) {
+        throw new PathRejected(
+          `${absolute} is ${info.size} bytes, over the ${MAX_FILE_BYTES}-byte limit.`,
+          "too-large"
+        );
+      }
       return await readFile(absolute, "utf8");
     } catch (error40) {
+      if (error40 instanceof PathRejected) throw error40;
       if (error40.code === "ENOENT") return "";
       throw new PathRejected(`Cannot read ${absolute}.`, "unreadable");
     }
   }
   /**
-   * Write via a temp file in the same directory, then rename. A rename inside
-   * one filesystem is atomic, so a crash mid-write leaves the original intact
-   * rather than half a file.
+   * Writes content to a path, atomically.
+   *
+   * The write goes to a temp file in the same directory and is then renamed,
+   * because a rename within one filesystem is atomic: a crash mid-write leaves
+   * the original intact rather than half a file.
+   *
+   * @param absolute - An already-resolved path inside a root.
+   * @param content - The bytes to write.
+   * @param mode - Permissions of the file being replaced, restored after the
+   *   write so editing a `0755` script does not silently make it `0644`.
+   * @returns The size and hash of what was written.
    */
-  async commit(absolute, content) {
+  async commit(absolute, content, mode) {
     const bytes = Buffer.byteLength(content, "utf8");
     const digest = sha256(content);
     if (this.dryRun) return { bytes, sha256: digest };
     await mkdir(dirname(absolute), { recursive: true });
-    const temp = join(dirname(absolute), `.${Date.now()}.interactive-editor.tmp`);
+    const temp = join(dirname(absolute), `.${randomUUID()}.interactive-editor.tmp`);
     await writeFile(temp, content, "utf8");
     try {
+      if (mode !== void 0) await chmod(temp, mode & 4095);
       await rename(temp, absolute);
     } catch (error40) {
       await rm(temp, { force: true });
@@ -28715,6 +28911,11 @@ var FsGuard = class {
     }
     return { bytes, sha256: digest };
   }
+  /**
+   * Deletes a path inside the roots.
+   *
+   * @param absolute - An already-resolved path.
+   */
   async remove(absolute) {
     if (this.dryRun) return;
     await rm(absolute, { force: true });
@@ -28876,6 +29077,9 @@ function resolveReview(proposalId, outcome) {
   found.resolve(outcome);
   return true;
 }
+function isAwaitingReview(proposalId) {
+  return waiting.has(proposalId);
+}
 
 // src/tools/view.ts
 import { readFile as readFile2 } from "node:fs/promises";
@@ -28952,123 +29156,8 @@ function whyNotPanel(html) {
 }
 
 // src/proposals.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { resolve as resolve3 } from "node:path";
-
-// shared/diff.ts
-var LCS_LINE_BUDGET = 1500;
-var CONTEXT_LINES = 3;
-function splitLines(text) {
-  if (text === "") return [];
-  return text.replace(/\r\n/g, "\n").split("\n");
-}
-function diffLines(before, after) {
-  const a = splitLines(before);
-  const b = splitLines(after);
-  let prefix = 0;
-  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix += 1;
-  let suffix = 0;
-  while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) {
-    suffix += 1;
-  }
-  const midA = a.slice(prefix, a.length - suffix);
-  const midB = b.slice(prefix, b.length - suffix);
-  const truncated = midA.length > LCS_LINE_BUDGET && midB.length > LCS_LINE_BUDGET;
-  const middle = truncated ? wholesaleReplace(midA, midB, prefix) : lcsDiff(midA, midB, prefix);
-  const lines = [
-    ...a.slice(0, prefix).map((text, i) => line("equal", i + 1, i + 1, text)),
-    ...middle,
-    ...a.slice(a.length - suffix).map((text, i) => line("equal", a.length - suffix + i + 1, b.length - suffix + i + 1, text))
-  ];
-  const stats = {
-    added: lines.filter((l) => l.kind === "add").length,
-    removed: lines.filter((l) => l.kind === "remove").length,
-    ...truncated ? { truncated: true } : {}
-  };
-  return { hunks: toHunks(lines), stats };
-}
-function line(kind, oldLine, newLine, text) {
-  return { kind, oldLine, newLine, text };
-}
-function wholesaleReplace(a, b, offset) {
-  return [
-    ...a.map((text, i) => line("remove", offset + i + 1, null, text)),
-    ...b.map((text, i) => line("add", null, offset + i + 1, text))
-  ];
-}
-function lcsDiff(a, b, offset) {
-  const n = a.length;
-  const m2 = b.length;
-  const table = new Uint32Array((n + 1) * (m2 + 1));
-  const at = (i2, j3) => i2 * (m2 + 1) + j3;
-  for (let i2 = n - 1; i2 >= 0; i2 -= 1) {
-    for (let j3 = m2 - 1; j3 >= 0; j3 -= 1) {
-      table[at(i2, j3)] = a[i2] === b[j3] ? table[at(i2 + 1, j3 + 1)] + 1 : Math.max(table[at(i2 + 1, j3)], table[at(i2, j3 + 1)]);
-    }
-  }
-  const out = [];
-  let i = 0;
-  let j2 = 0;
-  while (i < n && j2 < m2) {
-    if (a[i] === b[j2]) {
-      out.push(line("equal", offset + i + 1, offset + j2 + 1, a[i]));
-      i += 1;
-      j2 += 1;
-    } else if (table[at(i + 1, j2)] >= table[at(i, j2 + 1)]) {
-      out.push(line("remove", offset + i + 1, null, a[i]));
-      i += 1;
-    } else {
-      out.push(line("add", null, offset + j2 + 1, b[j2]));
-      j2 += 1;
-    }
-  }
-  while (i < n) {
-    out.push(line("remove", offset + i + 1, null, a[i]));
-    i += 1;
-  }
-  while (j2 < m2) {
-    out.push(line("add", null, offset + j2 + 1, b[j2]));
-    j2 += 1;
-  }
-  return out;
-}
-function toHunks(lines) {
-  const changed = lines.map((l, i) => l.kind === "equal" ? -1 : i).filter((i) => i !== -1);
-  if (changed.length === 0) return [];
-  const ranges = [];
-  for (const index of changed) {
-    const start = Math.max(0, index - CONTEXT_LINES);
-    const end = Math.min(lines.length - 1, index + CONTEXT_LINES);
-    const last = ranges[ranges.length - 1];
-    if (last && start <= last[1] + 1) {
-      last[1] = Math.max(last[1], end);
-    } else {
-      ranges.push([start, end]);
-    }
-  }
-  return ranges.map(([start, end]) => {
-    const slice = lines.slice(start, end + 1);
-    return {
-      oldStart: slice.find((l) => l.oldLine !== null)?.oldLine ?? 0,
-      newStart: slice.find((l) => l.newLine !== null)?.newLine ?? 0,
-      lines: slice
-    };
-  });
-}
-function formatUnifiedDiff(hunks, label) {
-  if (hunks.length === 0) return `(no changes to ${label})`;
-  const out = [`--- ${label} (on disk)`, `+++ ${label} (proposed)`];
-  for (const hunk of hunks) {
-    const oldCount = hunk.lines.filter((l) => l.kind !== "add").length;
-    const newCount = hunk.lines.filter((l) => l.kind !== "remove").length;
-    out.push(`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`);
-    for (const line2 of hunk.lines) {
-      const marker = line2.kind === "add" ? "+" : line2.kind === "remove" ? "-" : " ";
-      out.push(marker + line2.text);
-    }
-  }
-  return out.join("\n");
-}
 
 // shared/lint.ts
 var DESTRUCTIVE_DELETION_RATIO = 0.5;
@@ -29262,15 +29351,20 @@ function hasBlockers(findings) {
 }
 
 // src/version.ts
-var SERVER_VERSION = "0.5.2";
+var SERVER_VERSION = "0.6.0";
 
 // src/proposals.ts
 var proposals = /* @__PURE__ */ new Map();
+var MAX_RETAINED = 32;
+var PROPOSAL_TTL_MS = 60 * 60 * 1e3;
 async function createProposal(guard, input) {
-  const target = await guard.describe(input.path);
-  const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
+  const target = input.target ?? await guard.describe(input.path);
+  const baseline = input.target && input.baseline !== void 0 ? input.baseline : target.absolute && target.exists ? await guard.read(target.absolute) : "";
+  for (const open of openProposals()) {
+    if (samePath(open.target.requested, input.path)) resolveProposal(open.proposalId, "superseded");
+  }
   const proposal = {
-    proposalId: randomUUID(),
+    proposalId: randomUUID2(),
     mode: input.mode,
     target,
     content: input.mode === "delete" ? "" : input.content,
@@ -29278,9 +29372,11 @@ async function createProposal(guard, input) {
     baseline,
     rationale: input.rationale,
     attached: false,
-    destructiveAcknowledged: false
+    destructiveAcknowledged: false,
+    createdAt: Date.now()
   };
   proposals.set(proposal.proposalId, proposal);
+  evict();
   return proposal;
 }
 function getProposal(proposalId) {
@@ -29294,17 +29390,28 @@ function getProposal(proposalId) {
 }
 function updateProposal(proposalId, patch) {
   const current = getProposal(proposalId);
-  if (current.committedAt) {
-    throw new Error("This proposal has already been committed. Open a new one.");
+  if (current.resolvedAt) {
+    throw new Error(
+      `This proposal was already ${current.resolution ?? "resolved"}. Open a new one.`
+    );
   }
   const next = { ...current, ...patch, proposalId: current.proposalId };
   proposals.set(proposalId, next);
   return next;
 }
-async function refreshTarget(guard, proposal) {
+function resolveProposal(proposalId, resolution) {
+  const current = getProposal(proposalId);
+  const next = { ...current, resolvedAt: (/* @__PURE__ */ new Date()).toISOString(), resolution };
+  proposals.set(proposalId, next);
+  return next;
+}
+async function restatTarget(guard, proposal) {
   const target = await guard.describe(proposal.target.requested);
   const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
-  return updateProposal(proposal.proposalId, { target, baseline });
+  return { target, baseline };
+}
+function isStale(baselineNow, baselineAtOpen) {
+  return sha256(baselineNow) !== sha256(baselineAtOpen);
 }
 function buildEditorState(guard, proposal) {
   const after = proposal.mode === "delete" ? "" : proposal.content;
@@ -29323,7 +29430,7 @@ function diffStatsFor(proposal) {
   return diffLines(proposal.baseline, after).stats;
 }
 function findOpenProposal(path) {
-  const open = [...proposals.values()].filter((p2) => !p2.committedAt);
+  const open = openProposals();
   if (open.length === 0) return void 0;
   if (path === void 0) return open[open.length - 1];
   const exact = open.filter((p2) => p2.target.requested === path);
@@ -29341,7 +29448,20 @@ function samePath(a, b) {
   }
 }
 function openProposals() {
-  return [...proposals.values()].filter((p2) => !p2.committedAt);
+  const cutoff = Date.now() - PROPOSAL_TTL_MS;
+  return [...proposals.values()].filter((p2) => !p2.resolvedAt && p2.createdAt >= cutoff);
+}
+function evict() {
+  const cutoff = Date.now() - PROPOSAL_TTL_MS;
+  for (const [id, proposal] of proposals) {
+    if (proposal.resolvedAt || proposal.createdAt < cutoff) proposals.delete(id);
+    if (proposals.size <= MAX_RETAINED) break;
+  }
+  while (proposals.size > MAX_RETAINED) {
+    const oldest = proposals.keys().next().value;
+    if (oldest === void 0) break;
+    proposals.delete(oldest);
+  }
 }
 
 // src/tools/results.ts
@@ -29352,21 +29472,46 @@ function handleFor(state) {
     proposalId: proposal.proposalId,
     display: proposal.target.display,
     mode: proposal.mode,
-    ...proposal.target.absolute ? {} : { refused: true }
+    ...proposal.target.absolute ? {} : { refused: true, rejection: proposal.target.rejection ?? "unresolvable" }
   };
 }
+function explainRejection(target, roots) {
+  const reason = target.rejection ?? "unresolvable";
+  const quoted = `"${target.requested}"`;
+  switch (reason) {
+    case "outside-roots":
+      return `Refused: ${quoted} is outside the roots this editor will write to.
+Writable roots:
+${roots.map((r2) => `  ${r2}`).join("\n")}`;
+    case "denied":
+      return `Refused: ${quoted} matches the deny list${target.deniedBy ? ` (${target.deniedBy})` : ""}, so this editor will not touch it even though it is inside a writable root. Start the server with --deny to choose your own patterns.`;
+    case "not-a-file":
+      return `Refused: ${quoted} is a directory, not a file.`;
+    case "too-large":
+      return `Refused: ${quoted} is too large to review in an editor.`;
+    case "unresolvable":
+    default:
+      return `Refused: ${quoted} could not be resolved to a path on disk.`;
+  }
+}
+function outcomeDescription(context) {
+  return context.blockOnReview ? "It does not return until the human acts: either they accept it and the result is a receipt for what landed, or they comment on it, which is a rejection \u2014 nothing is written and the result carries what they want changed, for you to redraft." : "It returns as soon as the panel is open, so the result is the diff rather than the verdict. The outcome arrives separately: a receipt if they saved, or their comments quoted against the lines they are about. Comments mean the draft was declined and nothing was written, so redraft from what they said rather than re-proposing.";
+}
 function openerResult(state) {
+  const refused = !state.proposal.target.absolute;
   return {
     content: [{ type: "text", text: describeState(state) }],
-    structuredContent: handleFor(state)
+    structuredContent: handleFor(state),
+    ...refused ? { isError: true } : {}
   };
 }
 function openedFileResult(state) {
   const { target } = state.proposal;
-  const text = target.absolute ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : `Refused: "${target.requested}" is outside the roots this editor will write to.`;
+  const text = target.absolute ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : explainRejection(target, state.roots);
   return {
     content: [{ type: "text", text }],
-    structuredContent: handleFor(state)
+    structuredContent: handleFor(state),
+    ...target.absolute ? {} : { isError: true }
   };
 }
 function panelResult(state, note) {
@@ -29377,11 +29522,7 @@ function panelResult(state, note) {
 }
 function describeState(state) {
   const { proposal, findings } = state;
-  if (!proposal.target.absolute) {
-    return `Refused: "${proposal.target.requested}" is outside the roots this editor will write to.
-Writable roots:
-${state.roots.map((r2) => `  ${r2}`).join("\n")}`;
-  }
+  if (!proposal.target.absolute) return explainRejection(proposal.target, state.roots);
   const stats = diffStatsFor(proposal);
   const lines = [
     `Editor open \u2014 nothing has been written.`,
@@ -29405,7 +29546,12 @@ ${state.roots.map((r2) => `  ${r2}`).join("\n")}`;
   return lines.join("\n");
 }
 function diffForModel(state) {
-  const full = formatUnifiedDiff(state.diff, state.proposal.target.display);
+  const { proposal } = state;
+  const after = proposal.mode === "delete" ? "" : proposal.content;
+  const full = formatUnifiedDiff(state.diff, proposal.target.display, {
+    before: endsWithNewline(proposal.baseline),
+    after: endsWithNewline(after)
+  });
   const lines = full.split("\n");
   if (lines.length <= MODEL_DIFF_LINE_BUDGET) return full;
   return [
@@ -29423,10 +29569,12 @@ function errorResult(message) {
 }
 
 // src/tools/awaitReview.ts
+var ATTACH_POLL_MS = 25;
 async function waitForReview(context, proposalId, opened) {
   if (!context.blockOnReview || !context.canRenderPanel()) return opened;
   const settled = awaitReview(proposalId, context.reviewTimeoutMs);
-  if (!await attachedWithin(proposalId, context.reviewGraceMs)) {
+  const attached = await attachedWithin(proposalId, context.reviewGraceMs);
+  if (!attached && isAwaitingReview(proposalId)) {
     resolveReview(proposalId, {
       kind: "unanswered",
       why: "This host advertises MCP Apps but no editor attached to the proposal."
@@ -29438,17 +29586,20 @@ async function attachedWithin(proposalId, graceMs) {
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
     if (getProposal(proposalId).attached) return true;
-    await new Promise((r2) => setTimeout(r2, 25));
+    if (!isAwaitingReview(proposalId)) return false;
+    await new Promise((r2) => setTimeout(r2, ATTACH_POLL_MS));
   }
   return getProposal(proposalId).attached;
 }
 function describeOutcome(outcome, opened) {
   switch (outcome.kind) {
-    case "committed":
+    case "committed": {
+      const { content: _body, ...receipt } = outcome.receipt;
       return {
         content: [{ type: "text", text: describeReceipt(outcome.receipt) }],
-        structuredContent: outcome.receipt
+        structuredContent: receipt
       };
+    }
     case "changes-requested":
       return {
         content: [
@@ -29486,22 +29637,25 @@ function registerProposeWrite(server, context) {
     "propose_write",
     {
       title: "Propose a file write",
-      description: "Open an editable review panel for writing a file. Shows the human a diff against what is on disk, lets them edit your proposed content directly, and waits for them to decide. This tool NEVER writes anything itself. It does not return until they act: either they accept it and the result is a receipt for what landed, or they comment on it, which is a rejection \u2014 nothing is written and the result carries what they want changed, for you to redraft and propose again.",
+      description: "Opens an editable review panel for writing a file. Shows the human a diff against what is on disk and lets them edit the proposed content directly before it lands. This tool never writes anything itself. " + outcomeDescription(context),
       inputSchema: {
         path: external_exports.string().describe("File to write. Absolute, or relative to the first configured root."),
         content: external_exports.string().describe("The full new contents of the file."),
         rationale: external_exports.string().optional().describe("One or two sentences on why this write. Shown to the human above the editor.")
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { resourceUri: VIEW_URI, visibility: ["model", "app"] } }
     },
     async ({ path, content, rationale }) => {
       const target = await guard.describe(path);
+      const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
       const proposal = await createProposal(guard, {
         path,
         content,
         mode: target.exists ? "overwrite" : "create",
-        rationale
+        rationale,
+        target,
+        baseline
       });
       const opened = openerResult(buildEditorState(guard, proposal));
       return waitForReview(context, proposal.proposalId, opened);
@@ -29517,12 +29671,12 @@ function registerOpenFile(server, context) {
     "open_file",
     {
       title: "Open a file for the human to edit",
-      description: "Open a file in the review panel so the human can read it and change it by hand. Loads the current contents into the editor; nothing is written until they press the button. Use this when they want to look at or edit a file themselves rather than have you rewrite it \u2014 and note that the file body goes to the panel, not into your context, so use read_file if you need to see it too.",
+      description: "Opens a file in the review panel so the human can read it and change it by hand. Loads the current contents into the editor; nothing is written until they press the button. Use this when they want to look at or edit a file themselves rather than have you rewrite it. The file body goes to the panel, not into your context, so call read_file if you need to see it too. " + outcomeDescription(context),
       inputSchema: {
         path: external_exports.string().describe("File to open. Absolute, or relative to the first configured root."),
         note: external_exports.string().optional().describe("Optional line shown above the editor, e.g. what they asked for.")
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { resourceUri: VIEW_URI, visibility: ["model", "app"] } }
     },
     async ({ path, note }) => {
@@ -29532,7 +29686,9 @@ function registerOpenFile(server, context) {
         path,
         content: current,
         mode: target.exists ? "overwrite" : "create",
-        rationale: note ?? "Opened for editing. Nothing changes until it is saved."
+        rationale: note ?? "Opened for editing. Nothing changes until it is saved.",
+        target,
+        baseline: current
       });
       const opened = openedFileResult(buildEditorState(guard, proposal));
       return waitForReview(context, proposal.proposalId, opened);
@@ -29548,20 +29704,27 @@ function registerProposeDelete(server, context) {
     "propose_delete",
     {
       title: "Propose a file deletion",
-      description: "Open a review panel for deleting a file. Shows the human everything that would be lost and waits for an explicit confirmation. Never deletes anything itself.",
+      description: "Opens a review panel for deleting a file. Shows the human everything that would be lost and waits for an explicit confirmation. Never deletes anything itself. " + outcomeDescription(context),
       inputSchema: {
         path: external_exports.string().describe("File to delete."),
         rationale: external_exports.string().optional().describe("Why this file should go.")
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       _meta: { ui: { resourceUri: VIEW_URI, visibility: ["model", "app"] } }
     },
     async ({ path, rationale }) => {
+      const target = await guard.describe(path);
+      if (target.absolute && !target.exists) {
+        return errorResult(`${target.display} does not exist, so there is nothing to delete.`);
+      }
+      const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
       const proposal = await createProposal(guard, {
         path,
         content: "",
         mode: "delete",
-        rationale
+        rationale,
+        target,
+        baseline
       });
       const opened = openerResult(buildEditorState(guard, proposal));
       return waitForReview(context, proposal.proposalId, opened);
@@ -29578,11 +29741,12 @@ function registerEditorAttach(server, { guard }) {
       title: "Attach the panel to a proposal",
       description: "Called by the panel when it mounts. Not for agent use.",
       inputSchema: { proposalId: external_exports.string() },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId }) => {
-      await refreshTarget(guard, getProposal(proposalId));
-      const proposal = updateProposal(proposalId, { attached: true });
+      const { target, baseline } = await restatTarget(guard, getProposal(proposalId));
+      const proposal = updateProposal(proposalId, { target, baseline, attached: true });
       return panelResult(
         buildEditorState(guard, proposal),
         "Attached. The panel has the proposal."
@@ -29602,26 +29766,16 @@ function registerEditorUpdate(server, { guard }) {
       inputSchema: {
         proposalId: external_exports.string(),
         content: external_exports.string().optional(),
-        path: external_exports.string().optional(),
         destructiveAcknowledged: external_exports.boolean().optional()
       },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } }
     },
-    async ({ proposalId, content, path, destructiveAcknowledged }) => {
-      const current = getProposal(proposalId);
-      let next = updateProposal(proposalId, {
+    async ({ proposalId, content, destructiveAcknowledged }) => {
+      const next = updateProposal(proposalId, {
         ...content !== void 0 ? { content } : {},
         ...destructiveAcknowledged !== void 0 ? { destructiveAcknowledged } : {}
       });
-      if (path !== void 0 && path !== current.target.requested) {
-        const target = await guard.describe(path);
-        const baseline = target.absolute && target.exists ? await guard.read(target.absolute) : "";
-        next = updateProposal(proposalId, {
-          target,
-          baseline,
-          mode: next.mode === "delete" ? "delete" : target.exists ? "overwrite" : "create"
-        });
-      }
       return panelResult(buildEditorState(guard, next), "Updated.");
     }
   );
@@ -29631,7 +29785,9 @@ function registerEditorUpdate(server, { guard }) {
 async function commit(context, proposalId) {
   const { guard } = context;
   const before = getProposal(proposalId);
-  if (before.committedAt) throw new Error("This proposal has already been resolved.");
+  if (before.resolvedAt) {
+    throw new Error(`This proposal was already ${before.resolution ?? "resolved"}.`);
+  }
   if (!context.terminalApproval && !context.canRenderPanel()) {
     throw new Error(
       "This host does not render MCP Apps, so the editor never appeared and nobody has seen this diff. Refusing to write. Start the server with --terminal-approval to fall back to your client's own approve/deny prompt instead."
@@ -29641,30 +29797,36 @@ async function commit(context, proposalId) {
     throw new Error("This proposal was never opened in the editor. Refusing to write.");
   }
   const baselineAtOpen = before.baseline;
-  const proposal = await refreshTarget(guard, before);
-  if (!proposal.target.absolute) {
-    throw new Error(`${proposal.target.requested} is not a writable path.`);
+  const { target, baseline } = await restatTarget(guard, before);
+  if (!target.absolute) {
+    throw new Error(`${target.requested} is not a writable path.`);
   }
-  if (sha256(proposal.baseline) !== sha256(baselineAtOpen)) {
+  if (isStale(baseline, baselineAtOpen)) {
+    resolveProposal(proposalId, "superseded");
     throw new Error(
-      `${proposal.target.display} changed on disk while the editor was open. The diff that was approved is no longer the diff that would be applied. Reopen the proposal.`
+      `${target.display} changed on disk while the editor was open. The diff that was approved is not the diff that would be applied. This proposal is closed; open a new one against the current file.`
     );
   }
+  const proposal = updateProposal(proposalId, { target, baseline });
   const findings = buildEditorState(guard, proposal).findings;
   if (hasBlockers(findings)) {
     const blockers = findings.filter((f2) => f2.severity === "blocker").map((f2) => f2.message);
     throw new Error(`Refusing to write:
 ${blockers.map((b) => `  - ${b}`).join("\n")}`);
   }
-  const result = proposal.mode === "delete" ? (await guard.remove(proposal.target.absolute), { bytes: 0, sha256: sha256("") }) : await guard.commit(proposal.target.absolute, proposal.content);
-  updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
+  const result = proposal.mode === "delete" ? (await guard.remove(proposal.target.absolute), { bytes: 0, sha256: sha256("") }) : await guard.commit(
+    proposal.target.absolute,
+    proposal.content,
+    proposal.target.onDisk?.mode
+  );
+  resolveProposal(proposalId, "committed");
   return {
     ok: true,
     path: proposal.target.absolute,
     display: proposal.target.display,
     mode: proposal.mode,
     bytes: result.bytes,
-    lines: proposal.content === "" ? 0 : proposal.content.split("\n").length,
+    lines: countLines(proposal.content),
     sha256: result.sha256,
     dryRun: guard.dryRun,
     editedByHuman: proposal.content !== proposal.originalContent,
@@ -29695,7 +29857,7 @@ function registerEditorCommit(server, context) {
 }
 
 // src/tools/editorDiscard.ts
-function registerEditorDiscard(server, _ctx) {
+function registerEditorDiscard(server, _context) {
   K3(
     server,
     "editor_discard",
@@ -29703,19 +29865,24 @@ function registerEditorDiscard(server, _ctx) {
       title: "Discard a proposal",
       description: "Called by the panel when the human closes without writing. Not for agent use.",
       inputSchema: { proposalId: external_exports.string(), reason: external_exports.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } }
     },
     async ({ proposalId, reason }) => {
       const proposal = getProposal(proposalId);
-      updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
-      resolveReview(proposalId, { kind: "discarded", ...reason ? { reason } : {} });
+      resolveProposal(proposalId, "discarded");
+      const delivered = resolveReview(proposalId, {
+        kind: "discarded",
+        ...reason ? { reason } : {}
+      });
       return {
         content: [
           {
             type: "text",
             text: `Discarded. Nothing was written to ${proposal.target.display}.` + (reason ? ` Reason: ${reason}` : "")
           }
-        ]
+        ],
+        structuredContent: { delivered }
       };
     }
   );
@@ -29737,7 +29904,7 @@ function registerEditorRequestChanges(server, _context) {
     },
     async ({ proposalId, message }) => {
       const proposal = getProposal(proposalId);
-      updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      resolveProposal(proposalId, "changes-requested");
       const waited = resolveReview(proposalId, { kind: "changes-requested", message });
       return {
         content: [
@@ -29793,27 +29960,39 @@ function registerEditorPending(server, { guard }) {
 }
 
 // src/tools/readFile.ts
+var READ_BUDGET = 2e5;
 function registerReadFile(server, { guard }) {
   K3(
     server,
     "read_file",
     {
       title: "Read a file inside the roots",
-      description: "Read a file the editor is allowed to write, so a proposal can be based on what is actually there. Refuses anything outside the configured roots.",
+      description: "Reads a file the editor is allowed to write, so a proposal can be based on what is actually there. Refuses anything outside the configured roots, and truncates very large files.",
       inputSchema: { path: external_exports.string() },
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["model", "app"] } }
     },
     async ({ path }) => {
       const target = await guard.describe(path);
-      if (!target.absolute) {
-        return errorResult(`${path} is outside the roots this server will touch.`);
-      }
+      if (!target.absolute) return errorResult(explainRejection(target, guard.roots));
       if (!target.exists) {
         return { content: [{ type: "text", text: `${target.display} does not exist.` }] };
       }
       const body = await guard.read(target.absolute);
-      return { content: [{ type: "text", text: body }] };
+      if (body.length <= READ_BUDGET) {
+        return { content: [{ type: "text", text: body }] };
+      }
+      const head = body.slice(0, READ_BUDGET);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${head}
+
+\u2026 truncated. ${target.display} is ${countLines(body)} lines (${body.length} characters); the first ${READ_BUDGET} are shown. Open it in the editor to see the rest.`
+          }
+        ]
+      };
     }
   );
 }
@@ -29838,17 +30017,21 @@ function registerListRoots(server, context) {
         content: [
           {
             type: "text",
-            text: `Writable roots:
+            text: `mcp-interactive-editor ${SERVER_VERSION}
+
+Writable roots:
 ${guard.roots.map((r2) => `  ${r2}`).join("\n")}
 
 ${verdict}` + (guard.dryRun ? "\n\nDRY RUN: commits are simulated, nothing reaches disk." : "")
           }
         ],
         structuredContent: {
+          serverVersion: SERVER_VERSION,
           roots: guard.roots,
           dryRun: guard.dryRun,
           rendersPanel,
-          terminalApproval: context.terminalApproval
+          terminalApproval: context.terminalApproval,
+          blockOnReview: context.blockOnReview
         }
       };
     }
@@ -29881,14 +30064,25 @@ function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
 }
 function hostRendersPanel(server) {
   const ui = Y3(server.server.getClientCapabilities());
-  if (!ui) return false;
-  return ui.mimeTypes === void 0 || ui.mimeTypes.includes(p);
+  return ui?.mimeTypes?.includes(p) === true;
 }
 
 // src/server.ts
 function dryRunFromEnv() {
   const raw = process.env.INTERACTIVE_EDITOR_DRY_RUN?.trim().toLowerCase();
   return raw === "true" || raw === "1" || raw === "yes";
+}
+function positiveInt(flag, raw) {
+  const value = Number(raw);
+  if (raw === void 0 || raw === "" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${flag} needs a positive number of milliseconds, got ${raw ?? "nothing"}`);
+  }
+  return value;
+}
+function inlineValue(flag, arg) {
+  const value = arg.slice(flag.length + 1);
+  if (value.trim() === "") throw new Error(`${flag} needs a value`);
+  return value;
 }
 function parseArgs(argv) {
   const cli = {
@@ -29905,23 +30099,30 @@ function parseArgs(argv) {
     } else if (arg === "--terminal-approval") {
       cli.terminalApproval = true;
     } else if (arg === "--review-timeout-ms") {
-      cli.reviewTimeoutMs = Number(argv[++i]);
+      cli.reviewTimeoutMs = positiveInt(arg, argv[++i]);
+    } else if (arg.startsWith("--review-timeout-ms=")) {
+      cli.reviewTimeoutMs = positiveInt(
+        "--review-timeout-ms",
+        inlineValue("--review-timeout-ms", arg)
+      );
     } else if (arg === "--block-on-review") {
       cli.blockOnReview = true;
     } else if (arg === "--review-grace-ms") {
-      cli.reviewGraceMs = Number(argv[++i]);
+      cli.reviewGraceMs = positiveInt(arg, argv[++i]);
+    } else if (arg.startsWith("--review-grace-ms=")) {
+      cli.reviewGraceMs = positiveInt("--review-grace-ms", inlineValue("--review-grace-ms", arg));
     } else if (arg === "--root") {
       const value = argv[++i];
       if (!value) throw new Error("--root needs a directory");
       cli.roots.push(expandHome(value));
     } else if (arg.startsWith("--root=")) {
-      cli.roots.push(expandHome(arg.slice("--root=".length)));
+      cli.roots.push(expandHome(inlineValue("--root", arg)));
     } else if (arg === "--deny") {
       const value = argv[++i];
       if (!value) throw new Error("--deny needs a pattern");
       cli.deny.push(value);
     } else if (arg.startsWith("--deny=")) {
-      cli.deny.push(arg.slice("--deny=".length));
+      cli.deny.push(inlineValue("--deny", arg));
     } else if (arg === "--allow-everything-in-roots") {
       cli.deny = [];
     } else if (arg === "--dry-run") {

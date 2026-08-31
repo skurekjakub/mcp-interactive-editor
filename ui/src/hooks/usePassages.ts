@@ -1,18 +1,30 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   annotatePassage,
   attachPassage,
   quotePassages,
+  unanswered,
   type Passage,
 } from "../../../shared/passages.js";
 import type { Bridge } from "../bridge.js";
+import { call } from "../lib/call.js";
 import { messageOf } from "../lib/results.js";
 
+/** The tray of highlighted regions and their journey back to the agent. */
 export interface PassageTray {
   /** The live selection, not yet pinned. */
   pending: Passage | null;
   select: (passage: Passage | null) => void;
   passages: Passage[];
+  /**
+   * Everything that would be sent right now, pinned or not.
+   *
+   * A live selection counts as selected so a single region needs no trip through
+   * the add button. That convenience only holds if the rest of the tray agrees:
+   * counting and blocking on the pinned set alone lets an uncommented stray
+   * selection ride along, contradicting the rule the tray enforces on screen.
+   */
+  outgoing: Passage[];
   pin: (passage: Passage) => void;
   annotate: (id: string, note: string) => void;
   unpin: (id: string) => void;
@@ -26,14 +38,19 @@ export interface PassageTray {
 }
 
 /**
- * Regions of the panel, and what is being asked about each, on their way back to
- * the agent.
+ * Collects highlighted regions and sends them back as a rejection.
  *
- * Sending is not a chat message. It resolves the tool call that opened this
- * panel and is still waiting on it, which is what makes one button press finish
- * the job rather than leaving a draft sitting in a composer for someone to send
- * a second time. It is also a rejection: commenting on a draft declines it, so
- * nothing is written and the agent is handed the words to redraft from.
+ * Sending is not a chat message. It resolves the tool call that opened the panel
+ * and is still waiting on it, which is what makes one button press finish the
+ * job rather than leaving a draft sitting in a composer to be sent a second
+ * time. It is also a rejection: commenting on a draft declines it, so nothing is
+ * written and the agent is handed the words to redraft from.
+ *
+ * @param bridge - How to reach the host, or null before it connects.
+ * @param proposalId - The proposal being commented on.
+ * @param display - The file name, for the quoted message.
+ * @param onFailure - Where to report a refusal.
+ * @returns The tray state and the operations on it.
  */
 export function usePassages(
   bridge: Bridge | null,
@@ -45,6 +62,11 @@ export function usePassages(
   const [passages, setPassages] = useState<Passage[]>([]);
   const [sending, setSending] = useState(false);
   const [rejected, setRejected] = useState(false);
+
+  const outgoing = useMemo(
+    () => (pending ? attachPassage(passages, pending) : passages),
+    [passages, pending],
+  );
 
   const pin = useCallback((next: Passage) => {
     setPassages((current) => attachPassage(current, next));
@@ -68,32 +90,27 @@ export function usePassages(
   const send = useCallback(
     async (note: string) => {
       if (!bridge || !display || !proposalId) return;
-      // Whatever is still highlighted counts as selected, so a single region
-      // needs no trip through the + button before it can be sent.
-      const outgoing = pending ? attachPassage(passages, pending) : passages;
-      if (outgoing.length === 0) return;
+      if (outgoing.length === 0 || unanswered(outgoing).length > 0) return;
 
       setSending(true);
       onFailure(null);
       try {
-        const result = await bridge.callTool("editor_request_changes", {
+        const sent = await call(bridge, "editor_request_changes", {
           proposalId,
           message: quotePassages(display, outgoing, note),
         });
-
-        if (result.isError) {
-          onFailure(textOf(result));
+        if (sent.refusal) {
+          onFailure(sent.refusal);
           return;
         }
 
         /*
-         * If an opening call was waiting, that call has just returned with these
-         * comments and the agent already has them. If nothing was waiting — the
-         * default, where the opener does not block — they still have to travel,
-         * so they go as a message instead. Either way the words arrive; only the
-         * route differs.
+         * If an opening call was waiting, it has just returned with these
+         * comments and the agent already has them. If nothing was waiting they
+         * still have to travel, so they go as a message instead. Either way the
+         * words arrive; only the route differs.
          */
-        const delivered = (result.structuredContent as { delivered?: boolean } | undefined)
+        const delivered = (sent.result.structuredContent as { delivered?: boolean } | undefined)
           ?.delivered;
         if (delivered !== true) {
           await bridge.sendMessage(quotePassages(display, outgoing, note));
@@ -107,13 +124,14 @@ export function usePassages(
         setSending(false);
       }
     },
-    [bridge, proposalId, display, passages, pending, clear, onFailure],
+    [bridge, proposalId, display, outgoing, clear, onFailure],
   );
 
   return {
     pending,
     select: setPending,
     passages,
+    outgoing,
     pin,
     annotate,
     unpin,
@@ -123,11 +141,4 @@ export function usePassages(
     rejected,
     active: pending !== null || passages.length > 0,
   };
-}
-
-function textOf(result: { content: Array<{ type: string; text?: string }> }): string {
-  return result.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text ?? "")
-    .join("\n");
 }

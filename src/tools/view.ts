@@ -6,7 +6,9 @@ import { RESOURCE_MIME_TYPE, registerAppResource } from "@modelcontextprotocol/e
 import { VIEW_URI } from "./context.js";
 
 /**
- * The panel itself, served as one self-contained HTML resource.
+ * Registers the panel as one self-contained HTML resource.
+ *
+ * @param server - The MCP server to register against.
  */
 export function registerEditorView(server: McpServer): void {
   registerAppResource(
@@ -32,8 +34,9 @@ export function registerEditorView(server: McpServer): void {
 }
 
 /**
- * This module runs from three different trees, and they disagree about where the
- * built panel sits relative to it:
+ * Where the built panel might sit, relative to the module asking.
+ *
+ * The server runs from three different trees and they disagree:
  *
  *   .mcpb / plugin   <root>/server/index.js        -> <root>/ui
  *   compiled         <root>/dist/src/tools/view.js -> <root>/dist/ui
@@ -47,6 +50,12 @@ const PANEL_CANDIDATES = ["../ui/index.html", "../../ui/index.html", "../../dist
 
 let cachedHtml: string | undefined;
 
+/**
+ * Loads the built panel, trying each candidate location.
+ *
+ * @returns The panel's HTML.
+ * @throws {Error} When no candidate holds a complete build.
+ */
 async function loadViewHtml(): Promise<string> {
   if (cachedHtml) return cachedHtml;
 
@@ -99,7 +108,7 @@ async function loadViewHtml(): Promise<string> {
 const MIN_PANEL_BYTES = 10_000;
 
 /**
- * Existence is not enough, and neither is being non-empty.
+ * Reports why a candidate is not a usable panel, or null when it is one.
  *
  * `ui/index.html` in the source tree is a vite entry stub that loads
  * `/src/main.tsx`, and it is reachable from more than one of the candidates

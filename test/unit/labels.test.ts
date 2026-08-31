@@ -4,6 +4,7 @@ import { basename, commitLabel } from "../../ui/src/lib/labels.js";
 
 const proposal = (mode: WriteMode, display: string): Proposal => ({
   proposalId: "p",
+  createdAt: 0,
   mode,
   target: {
     requested: display,

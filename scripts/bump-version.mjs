@@ -25,6 +25,7 @@ import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { versionDrift } from "./versions.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const next = process.argv[2];
@@ -37,8 +38,24 @@ if (!/^\d+\.\d+\.\d+$/.test(next ?? "")) {
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 const current = JSON.parse(read("package.json")).version;
 
+/*
+ * Check every declaration before deciding there is nothing to do. Guarding on
+ * `package.json` alone means a tree where only that file moved — a hand edit,
+ * `npm version`, a merge resolution, a half-finished bump — reports success and
+ * leaves the plugin cache key stale for good.
+ */
+const drift = versionDrift();
+if (drift.length > 0) {
+  process.stderr.write(
+    `The declared versions disagree. Fix these before bumping:\n${drift
+      .map((d) => `  ${d}`)
+      .join("\n")}\n`,
+  );
+  process.exit(1);
+}
+
 if (current === next) {
-  process.stderr.write(`package.json is already at ${next}. Nothing to do.\n`);
+  process.stderr.write(`Every declaration is already at ${next}. Nothing to do.\n`);
   process.exit(0);
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffLines } from "../../shared/diff.js";
+import { countLines, diffLines } from "../../shared/diff.js";
 import { DESTRUCTIVE_DELETION_RATIO, hasBlockers, lintProposal } from "../../shared/lint.js";
 import type { Proposal, WriteMode } from "../../shared/types.js";
 
@@ -10,6 +10,7 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
 
   return {
     proposalId: "test",
+    createdAt: 0,
     mode,
     content,
     originalContent: content,
@@ -29,9 +30,10 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
         ? {
             onDisk: {
               bytes: baseline.length,
-              lines: baseline.split("\n").length,
+              lines: countLines(baseline),
               sha256: "x",
               mtimeMs: 0,
+              mode: 0o644,
             },
           }
         : {}),
@@ -83,7 +85,9 @@ describe("destructive changes", () => {
     const finding = findings.find((f) => f.id === "large-deletion");
 
     expect(finding?.severity).toBe("blocker");
-    expect(finding?.message).toMatch(/removes 99 of 101 lines \(98%\)/);
+    // 100 lines, not 101: the newline terminating the last one does not start
+    // another, and a count that says otherwise skews this very ratio.
+    expect(finding?.message).toMatch(/removes 99 of 100 lines \(99%\)/);
     expect(hasBlockers(findings)).toBe(true);
   });
 

@@ -1,6 +1,6 @@
 {
   "name": "mcp-interactive-editor",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "description": "An MCP App that opens an interactive editor for every file write a model proposes. You edit it by hand, and nothing reaches disk until you say so.",
   "files": [
@@ -12,7 +12,7 @@
     "build:server": "tsc -p tsconfig.json",
     "bundle": "node scripts/bundle.mjs",
     "bump": "node scripts/bump-version.mjs",
-    "pack": "npm run bundle && mcpb pack bundle dist/mcp-interactive-editor.mcpb",
+    "pack": "npm run build && npm run bundle && mcpb pack bundle dist/mcp-interactive-editor.mcpb",
     "preview": "vite --port 5178",
     "pretest": "npm run build && npm run bundle",
     "test": "vitest run",
@@ -22,7 +22,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p ui/tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "npm run typecheck && npm run format:check && npm test",
+    "lint:comments": "node scripts/check-comments.mjs",
+    "verify": "npm run typecheck && npm run format:check && npm run lint:comments && npm test",
     "start": "node dist/src/server.js"
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^3.2.7",
     "esbuild": "^0.25.12",
     "jsdom": "^30.0.1",
     "prettier": "^3.9.6",

@@ -24,7 +24,8 @@ import type { CommitReceipt, EditorState, ProposalHandle } from "../../shared/ty
  * `<repo>/bundle/server` up to `<repo>/dist/ui` — onto the real panel. That path
  * does not exist inside the shipped archive. So a server that had lost the flat
  * layout candidate would still satisfy every assertion here while the `.mcpb`
- * was broken, which is precisely the 0.2.0 bug. Testing in place cannot see it;
+ * was broken, which is the packaging defect this parameterisation exists for.
+ * Testing in place cannot see it;
  * only a copy with nothing above it can.
  */
 const PACKED_ROOT = mkdtempSync(join(tmpdir(), "interactive-editor-packed-"));
@@ -365,7 +366,11 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
 
       await attach(id);
       await call("editor_commit", { proposalId: id });
-      await refusal("editor_commit", { proposalId: id }, /already been resolved/i);
+      await refusal(
+        "editor_commit",
+        { proposalId: id },
+        /was already (committed|discarded|changes-requested|superseded)/i,
+      );
     });
 
     it("does not know about proposals from a previous run", async () => {
@@ -417,17 +422,30 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
       expect(await readFile(target, "utf8")).toBe("somebody else got here first\n");
     });
 
-    it("blocks a retarget that lands outside the roots", async () => {
-      const opened = await openPanel({ path: join(root, "movable.txt"), content: "content\n" });
+    it("will not let an update move the proposal to another file", async () => {
+      // Arrange: a proposal against a file the human has been shown.
+      const target = join(root, "movable.txt");
+      const opened = await openPanel({ path: target, content: "content\n" });
       const id = opened.proposal.proposalId;
       await attach(id);
 
-      const retargeted = state(
-        await call("editor_update", { proposalId: id, path: join(root, "..", "elsewhere.txt") }),
+      // Act: ask the same proposal to point somewhere else entirely.
+      const elsewhere = join(root, "elsewhere.txt");
+      const after = state(
+        await call("editor_update", { proposalId: id, path: elsewhere, content: "moved\n" }),
       );
 
-      expect(retargeted.proposal.target.absolute).toBeNull();
-      await refusal("editor_commit", { proposalId: id }, /not a writable path|Refusing to write/);
+      /*
+       * Assert: the reviewed file and the written file must be the same file.
+       * The only human-visible decision point is the client's prompt for
+       * editor_commit, whose whole input is an opaque proposal id — so a
+       * proposal that could be re-pointed after the diff was approved would
+       * write a file nobody was shown.
+       */
+      expect(after.proposal.target.absolute).toBe(opened.proposal.target.absolute);
+      await call("editor_commit", { proposalId: id });
+      expect(await readFile(target, "utf8")).toBe("moved\n");
+      await expect(readFile(elsewhere, "utf8")).rejects.toThrow(/ENOENT/);
     });
   });
 
@@ -614,7 +632,11 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
       await call("editor_request_changes", { proposalId: id, message: "no" });
       await opening;
 
-      await refusal("editor_commit", { proposalId: id }, /already been resolved/i);
+      await refusal(
+        "editor_commit",
+        { proposalId: id },
+        /was already (committed|discarded|changes-requested|superseded)/i,
+      );
       await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
     });
 
@@ -679,6 +701,113 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
         await dryClient.close();
         await rm(dryRoot, { recursive: true, force: true });
       }
+    });
+  });
+
+  /*
+   * Every test above runs with --block-on-review, which no shipped
+   * configuration passes: neither the plugin manifest nor the `.mcpb` sets it.
+   * The default is the opposite, so without this block the mode that every
+   * install actually runs has no end-to-end coverage at all.
+   */
+  describe("the shipped default, which does not block", () => {
+    let plainRoot: string;
+    let plain: Client;
+
+    beforeAll(async () => {
+      plainRoot = await mkdtemp(join(tmpdir(), "interactive-editor-plain-"));
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [SERVER, "--root", plainRoot],
+        stderr: "ignore",
+      });
+      plain = new Client(
+        { name: "editor-tests", version: "1.0.0" },
+        { capabilities: RENDERS_PANEL },
+      );
+      await plain.connect(transport);
+    });
+
+    afterAll(async () => {
+      await plain?.close();
+      await rm(plainRoot, { recursive: true, force: true });
+    });
+
+    const plainCall = (name: string, args: Record<string, unknown> = {}) =>
+      plain.callTool({ name, arguments: args }) as Promise<CallToolResult>;
+
+    it("returns the diff promptly instead of waiting for a human", async () => {
+      // Arrange.
+      const started = Date.now();
+
+      // Act.
+      const opened = await plainCall("propose_write", {
+        path: join(plainRoot, "prompt.txt"),
+        content: "hello\n",
+      });
+
+      // Assert: the wait is opt-in, so this must not sit out any grace period.
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(text(opened)).toMatch(/Editor open/);
+      expect(opened.isError).toBeFalsy();
+    });
+
+    it("describes itself to the model as non-blocking", async () => {
+      // Assert: a description promising to wait, on a server that returns
+      // immediately, tells the model its next observation is a verdict when it
+      // is a diff.
+      const { tools } = await plain.listTools();
+      const description = tools.find((t) => t.name === "propose_write")?.description ?? "";
+
+      expect(description).toMatch(/returns as soon as the panel is open/i);
+      expect(description).not.toMatch(/does not return until/i);
+    });
+
+    it("reports that comments had nowhere to go, rather than claiming delivery", async () => {
+      // Arrange.
+      const opened = await plainCall("propose_write", {
+        path: join(plainRoot, "commented.txt"),
+        content: "draft\n",
+      });
+      const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+      await plainCall("editor_attach", { proposalId: id });
+
+      // Act.
+      const sent = await plainCall("editor_request_changes", {
+        proposalId: id,
+        message: "not like that",
+      });
+
+      /*
+       * Assert: nothing was waiting on the review, so the panel has to be told
+       * to deliver the words itself. Claiming delivery here loses them.
+       */
+      expect((sent.structuredContent as { delivered?: boolean }).delivered).toBe(false);
+      await expect(readFile(join(plainRoot, "commented.txt"), "utf8")).rejects.toThrow(/ENOENT/);
+    });
+
+    it("still refuses a commit that no panel ever attached to", async () => {
+      // Arrange.
+      const opened = await plainCall("propose_write", {
+        path: join(plainRoot, "unattached.txt"),
+        content: "should not land\n",
+      });
+      const id = (opened.structuredContent as unknown as ProposalHandle).proposalId;
+
+      // Act.
+      const result = await plainCall("editor_commit", { proposalId: id });
+
+      // Assert.
+      expect(result.isError).toBe(true);
+      expect(text(result)).toMatch(/never opened in the editor/i);
+    });
+
+    it("reports its own version, so an install can be confirmed", async () => {
+      // Assert: without this there is no way to tell which build is answering.
+      const roots = await plainCall("list_roots");
+      const reported = roots.structuredContent as { serverVersion?: string };
+      expect(reported.serverVersion).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(reported).toMatchObject({ rendersPanel: true, blockOnReview: false });
     });
   });
 });

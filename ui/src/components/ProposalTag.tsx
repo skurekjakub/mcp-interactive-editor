@@ -1,5 +1,6 @@
 import type { DiffStats, Proposal } from "../../../shared/types.js";
 
+/** Properties of the lockout tag. */
 interface ProposalTagProps {
   proposal: Proposal;
   stats: DiffStats;
@@ -11,8 +12,14 @@ interface ProposalTagProps {
 }
 
 /**
- * The lockout tag. It says what is being held, why, and how much of the file
- * moves — the three things you need before deciding whether to look closer.
+ * Renders the lockout tag.
+ *
+ * It says what is being held, why, and how much of the file moves — the three
+ * things needed before deciding whether to look closer.
+ *
+ * @param props - Component properties.
+ * @param props.proposal - The proposal being reviewed.
+ * @returns The tag.
  */
 export function ProposalTag({
   proposal,

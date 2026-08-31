@@ -40,7 +40,7 @@ describe("resolving paths", () => {
     expect(target.absolute).toBeTruthy();
     expect(target.display).toBe("inside.txt");
     expect(target.exists).toBe(true);
-    expect(target.onDisk).toMatchObject({ lines: 2, sha256: sha256("inside\n") });
+    expect(target.onDisk).toMatchObject({ lines: 1, sha256: sha256("inside\n") });
   });
 
   it("accepts a file that does not exist yet", async () => {
@@ -70,8 +70,33 @@ describe("resolving paths", () => {
     expect((await guard.describe("   ")).absolute).toBeNull();
   });
 
-  it("rejects a directory", async () => {
-    await expect(guard.describe(root)).rejects.toThrow(/is a directory/);
+  /*
+   * A rejection has to be renderable. The host mounts the panel on the tool
+   * call, so a throw leaves it with no handle to claim and it spins until the
+   * claim timeout instead of showing the reason.
+   */
+  it("rejects a directory without throwing, naming the reason", async () => {
+    const target = await guard.describe(root);
+
+    expect(target.absolute).toBeNull();
+    expect(target.rejection).toBe("not-a-file");
+  });
+
+  it("distinguishes a denied path from one outside the roots", async () => {
+    const denied = await guard.describe(join(root, ".env"));
+    const outside = await guard.describe(join(root, "..", "elsewhere.txt"));
+
+    expect(denied.rejection).toBe("denied");
+    expect(denied.deniedBy).toBe(".env");
+    expect(outside.rejection).toBe("outside-roots");
+  });
+
+  it("anchors deny patterns so ordinary files are not caught by substring", async () => {
+    for (const name of ["shortcuts.keymap.ts", "notes.environment.md", "notes.pemberton.md"]) {
+      const target = await guard.describe(join(root, name));
+      expect(target.rejection, name).toBeUndefined();
+      expect(target.absolute, name).toBeTruthy();
+    }
   });
 });
 

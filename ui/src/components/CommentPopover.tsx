@@ -2,26 +2,43 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { rangeOf, type Passage } from "../../../shared/passages.js";
 import { placePopover, type SelectionAnchor } from "../lib/anchor.js";
 
+/** Width the box takes when the panel is wide enough for it. */
 const WIDTH = 340;
 
+/** Properties of the comment popover. */
 interface CommentPopoverProps {
   passage: Passage;
   anchor: SelectionAnchor;
+  /** True when the selection came from a pointer, so focus may be taken. */
+  fromPointer: boolean;
   onAdd: (passage: Passage, note: string) => void;
   onDismiss: () => void;
 }
 
 /**
- * The comment box, at the passage rather than at the far end of the panel.
+ * Renders the comment box at the passage rather than at the far end of the panel.
  *
  * Highlighting a few lines and then travelling to the bottom of the window to
  * say something about them puts the words and the thing they are about as far
- * apart as the layout allows. This opens where you are looking, above the
+ * apart as the layout allows. This opens where the reader is looking, above the
  * selection so it never covers it.
+ *
+ * @param props - Component properties.
+ * @param props.passage - The highlighted region being commented on.
+ * @param props.anchor - Where that region sits in the viewport.
+ * @param props.fromPointer - Whether focus may be moved into the box.
+ * @returns The floating comment box.
  */
-export function CommentPopover({ passage, anchor, onAdd, onDismiss }: CommentPopoverProps) {
+export function CommentPopover({
+  passage,
+  anchor,
+  fromPointer,
+  onAdd,
+  onDismiss,
+}: CommentPopoverProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const returnFocusTo = useRef<Element | null>(null);
   const [note, setNote] = useState("");
   const [at, setAt] = useState(() =>
     placePopover(anchor, { width: WIDTH, height: 120 }, viewport()),
@@ -35,12 +52,27 @@ export function CommentPopover({ passage, anchor, onAdd, onDismiss }: CommentPop
     setAt(placePopover(anchor, { width: WIDTH, height: box.offsetHeight }, viewport()));
   }, [anchor, note]);
 
-  // A fresh selection is a fresh question, and the box is useless unless you can
-  // start typing into it immediately.
   useEffect(() => {
     setNote("");
+    /*
+     * Only take focus from a pointer selection. Extending a selection with
+     * shift+arrow fires a keyup per keypress, so autofocusing on a keyboard
+     * selection pulls the caret out of the editor on the first one and the rest
+     * of the keystrokes are typed into this box instead.
+     */
+    if (!fromPointer) return;
+    returnFocusTo.current = document.activeElement;
     areaRef.current?.focus();
-  }, [passage.id]);
+  }, [passage.id, fromPointer]);
+
+  // Focus has to go back somewhere it can be used. Left alone it falls to the
+  // document body, where the next Tab restarts from the top of the panel.
+  useEffect(() => {
+    return () => {
+      const previous = returnFocusTo.current;
+      if (previous instanceof HTMLElement && document.contains(previous)) previous.focus();
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -56,12 +88,10 @@ export function CommentPopover({ passage, anchor, onAdd, onDismiss }: CommentPop
     <div
       ref={boxRef}
       className="popover"
+      role="dialog"
+      aria-label={`Comment on ${rangeOf(passage)}`}
       data-placement={at.placement}
-      style={{ top: at.top, left: at.left, width: WIDTH }}
-      // The panes clear the pending selection on mouseup; without this, reaching
-      // for the box would dismiss the box.
-      onMouseDown={(event) => event.stopPropagation()}
-      onMouseUp={(event) => event.stopPropagation()}
+      style={{ top: at.top, left: at.left, width: at.width }}
     >
       <div className="popover-head">
         <span className="selection-range">{rangeOf(passage)}</span>
@@ -103,6 +133,11 @@ export function CommentPopover({ passage, anchor, onAdd, onDismiss }: CommentPop
   );
 }
 
+/**
+ * Reads the current viewport size.
+ *
+ * @returns The window's inner dimensions.
+ */
 function viewport() {
   return { width: window.innerWidth, height: window.innerHeight };
 }

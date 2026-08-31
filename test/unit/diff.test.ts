@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffLines, formatUnifiedDiff, splitLines } from "../../shared/diff.js";
+import { countLines, diffLines, formatUnifiedDiff, splitLines } from "../../shared/diff.js";
 
 const lines = (n: number, prefix = "line") =>
   Array.from({ length: n }, (_, i) => `${prefix} ${i}`).join("\n");
@@ -13,8 +13,29 @@ describe("splitLines", () => {
     expect(splitLines("a\r\nb")).toEqual(["a", "b"]);
   });
 
-  it("counts a trailing newline as a final empty line", () => {
-    expect(splitLines("a\n")).toEqual(["a", ""]);
+  /*
+   * A trailing newline terminates the last line rather than starting an empty
+   * one. Counting it as a line inflates the receipt, the on-disk size, the `@@`
+   * headers and the destructive-write ratio, and renders a phantom empty row.
+   */
+  it("treats a trailing newline as terminating the last line", () => {
+    expect(splitLines("a\n")).toEqual(["a"]);
+    expect(splitLines("a\nb\n")).toEqual(["a", "b"]);
+    expect(splitLines("a\nb")).toEqual(["a", "b"]);
+  });
+
+  it("keeps interior blank lines, which are real lines", () => {
+    expect(splitLines("a\n\nb\n")).toEqual(["a", "", "b"]);
+  });
+
+  it("counts one line for one line of text", () => {
+    expect(countLines("hello\n")).toBe(1);
+    expect(countLines("")).toBe(0);
+  });
+
+  it("notices a change that only adds the final newline", () => {
+    const { stats } = diffLines("a\nb", "a\nb\n");
+    expect(stats.newlineAtEofChanged).toBe(true);
   });
 });
 

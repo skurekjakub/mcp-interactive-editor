@@ -6,6 +6,12 @@ import { buildEditorState, findOpenProposal, openProposals } from "../proposals.
 import type { ToolContext } from "./context.js";
 import { panelResult } from "./results.js";
 
+/**
+ * Registers the tool a panel uses to claim the proposal it was opened for.
+ *
+ * @param server - The MCP server to register against.
+ * @param context - Guard, for building the state to hand back.
+ */
 export function registerEditorPending(server: McpServer, { guard }: ToolContext): void {
   registerAppTool(
     server,

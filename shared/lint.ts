@@ -1,7 +1,11 @@
 /**
- * Checks that run on every keystroke in the View, and again on the server
- * before a commit is accepted. The server copy is the one that counts; the View
- * copy exists so you see the problem before you reach for the button.
+ * @module
+ *
+ * Checks that run on every keystroke in the View, and again on the server before
+ * a commit is accepted.
+ *
+ * The server copy is the one with authority; the View copy exists so a problem
+ * shows before the button is reached for.
  */
 import type { DiffStats, Finding, Proposal } from "./types.js";
 import { splitLines } from "./diff.js";
@@ -9,18 +13,28 @@ import { splitLines } from "./diff.js";
 /** Removing more than this share of an existing file needs an explicit tick. */
 export const DESTRUCTIVE_DELETION_RATIO = 0.5;
 /**
- * ...but only once there is enough file for the share to mean anything. Editing
- * the one line of a one-line file is not a 100% deletion in any sense a person
- * would recognise, and a checkbox in front of it would train you to tick without
- * reading — which is exactly the reflex this whole thing exists to prevent.
+ * How much file there has to be before that share means anything.
+ *
+ * Editing the one line of a one-line file is not a total deletion in any sense a
+ * person would recognise, and a checkbox in front of it trains the reflex to
+ * tick without reading — the reflex the whole panel exists to prevent.
  */
 export const DESTRUCTIVE_MIN_LINES = 10;
+
+/** How many lines have to go before the share is worth interrupting for. */
 export const DESTRUCTIVE_MIN_REMOVED = 5;
 /** Above this, the editor stops being pleasant and the diff stops being readable. */
 export const LARGE_FILE_LINES = 5000;
 
 const NUL = String.fromCharCode(0);
 
+/**
+ * Runs every check against a proposal.
+ *
+ * @param proposal - The proposal to check.
+ * @param stats - How much it adds and removes.
+ * @returns The findings, most severe first.
+ */
 export function lintProposal(proposal: Proposal, stats: DiffStats): Finding[] {
   const findings: Finding[] = [
     ...lintTarget(proposal),
@@ -30,10 +44,22 @@ export function lintProposal(proposal: Proposal, stats: DiffStats): Finding[] {
   return findings.sort((a, b) => weight(b.severity) - weight(a.severity));
 }
 
+/**
+ * Orders severities so the worst sorts first.
+ *
+ * @param severity - The severity to rank.
+ * @returns A sortable weight.
+ */
 function weight(severity: Finding["severity"]): number {
   return severity === "blocker" ? 2 : severity === "warning" ? 1 : 0;
 }
 
+/**
+ * Checks the path a proposal names.
+ *
+ * @param proposal - The proposal to check.
+ * @returns Findings about the target itself.
+ */
 function lintTarget(proposal: Proposal): Finding[] {
   const { target } = proposal;
 
@@ -85,8 +111,13 @@ function lintTarget(proposal: Proposal): Finding[] {
 }
 
 /**
- * The one-way-door checks. A write that mostly deletes is the failure mode
- * worth interrupting a human for.
+ * Checks how much of the file a proposal removes.
+ *
+ * A write that mostly deletes is the failure mode worth interrupting for.
+ *
+ * @param proposal - The proposal to check.
+ * @param stats - How much it adds and removes.
+ * @returns Findings about destructiveness.
  */
 function lintDestructiveness(proposal: Proposal, stats: DiffStats): Finding[] {
   const findings: Finding[] = [];
@@ -148,7 +179,14 @@ function lintDestructiveness(proposal: Proposal, stats: DiffStats): Finding[] {
   return findings;
 }
 
-/** Small, boring, fixable things. Every one of these carries the exact rewrite. */
+/**
+ * Checks the small, fixable properties of the content.
+ *
+ * Every finding here carries the exact rewrite that resolves it.
+ *
+ * @param proposal - The proposal to check.
+ * @returns Findings about the content, each with a fix.
+ */
 function lintContentHygiene(proposal: Proposal): Finding[] {
   const findings: Finding[] = [];
   const { content, baseline, mode } = proposal;
@@ -229,6 +267,12 @@ function lintContentHygiene(proposal: Proposal): Finding[] {
   return findings;
 }
 
+/**
+ * Reports which indentation style a file mostly uses.
+ *
+ * @param text - The file contents.
+ * @returns The dominant style, or null when neither clearly wins.
+ */
 function dominantIndent(text: string): "tabs" | "spaces" | null {
   let tabs = 0;
   let spaces = 0;
@@ -242,6 +286,12 @@ function dominantIndent(text: string): "tabs" | "spaces" | null {
   return null;
 }
 
+/**
+ * Reports whether any finding forbids the write outright.
+ *
+ * @param findings - The findings to inspect.
+ * @returns True when at least one is a blocker.
+ */
 export function hasBlockers(findings: Finding[]): boolean {
   return findings.some((f) => f.severity === "blocker");
 }
