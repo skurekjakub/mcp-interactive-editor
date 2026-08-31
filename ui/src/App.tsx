@@ -107,6 +107,7 @@ export function App() {
           path={proposal.target.display}
           sending={tray.sending}
           onAttach={tray.pin}
+          onAnnotate={tray.annotate}
           onRemove={tray.unpin}
           onSend={tray.send}
           onDismiss={tray.clear}

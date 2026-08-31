@@ -739,6 +739,87 @@ button {
   opacity: 0.6;
 }
 
+/* "diff" shrinks the editor rather than removing it. A change you cannot type
+   into is not a review, it is a screenshot. */
+.pane[data-compact="true"] {
+  min-height: 0;
+  max-height: 140px;
+}
+
+/* The tray stays put at the foot of the panel while the panes scroll behind it,
+   so the highlight you forgot to comment on is never scrolled out of reach. */
+.selection {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  border-top: 1px solid var(--rule);
+  box-shadow: 0 -8px 16px -12px rgba(0, 0, 0, 0.45);
+}
+
+.selection-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.selection-count {
+  font-weight: 600;
+}
+
+/* The one thing standing between you and sending. Say it in the hazard colour. */
+.selection-waiting {
+  color: var(--lock);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.selection-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.selection-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Answered rows recede; the ones still wanting a comment keep the lock edge. */
+.selection-row[data-answered="false"] .selection-quote {
+  border-left-color: var(--lock);
+}
+
+.selection-row[data-answered="true"] .selection-quote {
+  border-left-color: var(--add);
+}
+
+.selection-note {
+  margin-left: 13px;
+}
+
+.selection-chip-drop {
+  padding: 3px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.selection-chip-drop:hover {
+  color: var(--ink);
+  background: var(--paper-raised);
+}
+
 .sent-note {
   padding: 8px 16px;
   border-bottom: 1px solid var(--rule);

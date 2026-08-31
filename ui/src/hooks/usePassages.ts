@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import {
+  annotatePassage,
   attachPassage,
   describePassages,
   quotePassages,
@@ -16,6 +17,7 @@ export interface PassageTray {
   select: (passage: Passage | null) => void;
   passages: Passage[];
   pin: (passage: Passage) => void;
+  annotate: (id: string, note: string) => void;
   unpin: (id: string) => void;
   clear: () => void;
   send: (note: string) => Promise<void>;
@@ -52,6 +54,11 @@ export function usePassages(
     setPassages((current) => current.filter((p) => p.id !== id));
   }, []);
 
+  /** The comment for one highlight. Each carries its own; sending waits for all. */
+  const annotate = useCallback((id: string, note: string) => {
+    setPassages((current) => annotatePassage(current, id, note));
+  }, []);
+
   const clear = useCallback(() => {
     setPending(null);
     setPassages([]);
@@ -86,6 +93,7 @@ export function usePassages(
     select: setPending,
     passages,
     pin,
+    annotate,
     unpin,
     clear,
     send,

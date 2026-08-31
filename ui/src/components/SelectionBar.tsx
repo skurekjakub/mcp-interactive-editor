@@ -1,29 +1,36 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { describePassages, rangeOf, type Passage } from "../../../shared/passages.js";
+import {
+  isAnswered,
+  rangeOf,
+  sortPassages,
+  unanswered,
+  type Passage,
+} from "../../../shared/passages.js";
 
-const MAX_NOTE_HEIGHT = 160;
+const MAX_NOTE_HEIGHT = 120;
 
 interface SelectionBarProps {
   /** The live selection, not yet pinned. */
   pending: Passage | null;
-  /** Regions already pinned, in the order they were added. */
+  /** Regions already pinned. Shown in reading order, not the order they were clicked. */
   passages: Passage[];
   path: string;
   sending: boolean;
   onAttach: (passage: Passage) => void;
+  onAnnotate: (id: string, note: string) => void;
   onRemove: (id: string) => void;
   onSend: (note: string) => void;
   onDismiss: () => void;
 }
 
 /**
- * Select a passage in either pane and this appears: what you have pointed at, a
- * box to say what you want done with it, and a button that drops the whole thing
- * into the chat as if you had typed it.
+ * Highlights on their way to the chat, and what is being asked about each one.
  *
- * It sits under the panes rather than floating over the text — a popover would
- * cover the lines you are trying to talk about, which is the one thing it must
- * not do.
+ * It docks to the bottom of the panel and stays there while you work: every
+ * highlight is a row with its own comment box, and sending waits until none of
+ * them are empty. A pile of quotes with one paragraph underneath makes the
+ * reader guess which remark belongs to which region, and a tray that vanishes
+ * makes you re-select everything to add the one you forgot.
  */
 export function SelectionBar({
   pending,
@@ -31,47 +38,50 @@ export function SelectionBar({
   path,
   sending,
   onAttach,
+  onAnnotate,
   onRemove,
   onSend,
   onDismiss,
 }: SelectionBarProps) {
   const [note, setNote] = useState("");
-  const areaRef = useRef<HTMLTextAreaElement>(null);
 
-  // The box grows with the instruction. Asking for "instructions per region" and
-  // then handing over a one-line slot is its own kind of broken.
-  useLayoutEffect(() => {
-    const area = areaRef.current;
-    if (!area) return;
-    area.style.height = "auto";
-    area.style.height = `${Math.min(area.scrollHeight, MAX_NOTE_HEIGHT)}px`;
-  }, [note]);
-
+  const ordered = sortPassages(passages);
   const alreadyAttached = pending !== null && passages.some((p) => p.id === pending.id);
-  const outgoing = pending && !alreadyAttached ? [...passages, pending] : passages;
+  const waiting = unanswered(passages);
+  const nothingPinned = passages.length === 0;
+  const blocked = nothingPinned || waiting.length > 0;
 
   const submit = () => {
-    if (sending || outgoing.length === 0) return;
+    if (sending || blocked) return;
     onSend(note.trim());
     setNote("");
   };
 
   return (
-    <div className="selection">
-      {passages.length > 0 ? (
-        <div className="selection-chips">
-          {passages.map((p) => (
-            <span className="selection-chip" key={p.id} data-source={p.source}>
-              {rangeOf(p)}
-              <button
-                type="button"
-                className="selection-chip-drop"
-                onClick={() => onRemove(p.id)}
-                aria-label={`Remove ${rangeOf(p)}`}
-              >
-                ✕
-              </button>
-            </span>
+    <div className="selection" data-blocked={String(blocked)}>
+      <div className="selection-head">
+        <span className="selection-count">
+          {passages.length === 0
+            ? "Highlight something in either pane"
+            : `${passages.length} highlighted in ${basename(path)}`}
+        </span>
+        {waiting.length > 0 ? (
+          <span className="selection-waiting">
+            {waiting.length} still {waiting.length === 1 ? "needs a comment" : "need comments"}
+          </span>
+        ) : null}
+      </div>
+
+      {ordered.length > 0 ? (
+        <div className="selection-rows">
+          {ordered.map((passage) => (
+            <PassageRow
+              key={passage.id}
+              passage={passage}
+              disabled={sending}
+              onAnnotate={onAnnotate}
+              onRemove={onRemove}
+            />
           ))}
         </div>
       ) : null}
@@ -99,31 +109,84 @@ export function SelectionBar({
         }}
       >
         <textarea
-          ref={areaRef}
           className="selection-input"
           rows={1}
           value={note}
-          placeholder={`Ask Claude about ${describePassages(outgoing)} of ${basename(path)}`}
-          aria-label="What should Claude do with these passages"
+          placeholder="Anything else, about all of them together? Optional."
+          aria-label="An optional message about all the highlights together"
           onChange={(event) => setNote(event.target.value)}
-          onKeyDown={(event) => {
-            // Enter sends, shift+Enter is a newline. An instruction is often more
-            // than one line, and losing it to a stray Return is worse than the
-            // extra keystroke of reaching for shift.
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              submit();
-            }
-          }}
           disabled={sending}
         />
-        <button className="btn" type="submit" disabled={sending || outgoing.length === 0}>
+        <button
+          className="btn"
+          type="submit"
+          disabled={sending || blocked}
+          title={
+            nothingPinned
+              ? "Add at least one highlight first"
+              : waiting.length > 0
+                ? "Every highlight needs a comment before this can go"
+                : undefined
+          }
+        >
           {sending ? "Sending…" : "Send to Claude"}
         </button>
-        <button className="btn btn-quiet" type="button" onClick={onDismiss} aria-label="Dismiss">
+        <button className="btn btn-quiet" type="button" onClick={onDismiss} aria-label="Clear all">
           ✕
         </button>
       </form>
+    </div>
+  );
+}
+
+interface PassageRowProps {
+  passage: Passage;
+  disabled: boolean;
+  onAnnotate: (id: string, note: string) => void;
+  onRemove: (id: string) => void;
+}
+
+/**
+ * One highlight and the comment attached to it. Enter is a newline here rather
+ * than a send: this is the field you are composing in, and there is a button for
+ * the other thing.
+ */
+function PassageRow({ passage, disabled, onAnnotate, onRemove }: PassageRowProps) {
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const note = passage.note ?? "";
+
+  useLayoutEffect(() => {
+    const area = areaRef.current;
+    if (!area) return;
+    area.style.height = "auto";
+    area.style.height = `${Math.min(area.scrollHeight, MAX_NOTE_HEIGHT)}px`;
+  }, [note]);
+
+  return (
+    <div className="selection-row" data-answered={String(isAnswered(passage))}>
+      <div className="selection-quote">
+        <span className="selection-range">{rangeOf(passage)}</span>
+        <code className="selection-excerpt">{excerpt(passage.text)}</code>
+        <button
+          type="button"
+          className="selection-chip-drop"
+          onClick={() => onRemove(passage.id)}
+          aria-label={`Remove ${rangeOf(passage)}`}
+          disabled={disabled}
+        >
+          ✕
+        </button>
+      </div>
+      <textarea
+        ref={areaRef}
+        className="selection-input selection-note"
+        rows={1}
+        value={note}
+        placeholder={`What about ${rangeOf(passage)}?`}
+        aria-label={`Comment on ${rangeOf(passage)}`}
+        onChange={(event) => onAnnotate(passage.id, event.target.value)}
+        disabled={disabled}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 /**
- * A passage is a region of the panel the human pointed at, on its way to the
- * chat.
+ * A passage is a region of the panel the human pointed at, with what they wanted
+ * to say about it, on its way to the chat.
  *
  * Everything here is pure: the line arithmetic and the message formatting, which
  * is where the bugs actually live. The two panes keep only the part that has to
@@ -15,6 +15,11 @@ export interface Passage {
   text: string;
   startLine: number;
   endLine: number;
+  /**
+   * What the human wants said about this specific region. A passage without one
+   * is a quote with no question attached, which is why sending waits for it.
+   */
+  note?: string;
   /** Character range in the draft. Only meaningful when `source` is "editor". */
   start?: number;
   end?: number;
@@ -85,24 +90,61 @@ export function attachPassage(passages: Passage[], next: Passage): Passage[] {
   return passages.some((p) => p.id === next.id) ? passages : [...passages, next];
 }
 
+/** Replace one passage's comment, leaving the rest alone. */
+export function annotatePassage(passages: Passage[], id: string, note: string): Passage[] {
+  return passages.map((p) => (p.id === id ? { ...p, note } : p));
+}
+
+/**
+ * Reading order, not clicking order.
+ *
+ * These arrive in whatever order they were highlighted, so a reply about "the
+ * first one" means nothing and the reader has to jump around the file to follow
+ * their own question.
+ */
+export function sortPassages(passages: Passage[]): Passage[] {
+  return [...passages].sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+}
+
+export function isAnswered(passage: Passage): boolean {
+  return (passage.note ?? "").trim().length > 0;
+}
+
+/** Which passages are still waiting for a comment. */
+export function unanswered(passages: Passage[]): Passage[] {
+  return passages.filter((p) => !isAnswered(p));
+}
+
 /**
  * The message that lands in the chat. Every passage carries its line numbers,
- * because a quote without them is just a snippet, and the note goes last so the
- * instruction reads as being about everything above it.
+ * because a quote without them is just a snippet, and each one carries its own
+ * comment directly beneath it — a pile of quotes followed by a single paragraph
+ * leaves the reader guessing which remark belongs to which region.
  */
 export function quotePassages(path: string, passages: Passage[], note: string): string {
   if (passages.length === 0) return note;
 
-  const label = (p: Passage) => `${rangeOf(p)}${p.source === "diff" ? " (from the diff)" : ""}`;
-  const single = passages.length === 1;
+  const ordered = sortPassages(passages);
+  const lines: string[] = [`From the draft open in the interactive editor — \`${path}\`:`];
 
-  const head = single
-    ? `From the draft open in the interactive editor — \`${path}\`, ${label(passages[0])}:`
-    : `From the draft open in the interactive editor — \`${path}\`:`;
+  for (const passage of ordered) {
+    const from = passage.source === "diff" ? " (from the diff)" : "";
+    lines.push("", `${rangeOf(passage)}${from}:`, fence(passage.text));
+    if (isAnswered(passage)) {
+      // A blockquote, so the human's words are visibly theirs and not part of
+      // the file they are quoting.
+      lines.push(
+        ...(passage.note ?? "")
+          .trim()
+          .split("\n")
+          .map((l) => `> ${l}`),
+      );
+    }
+  }
 
-  const blocks = passages.map((p) => (single ? fence(p.text) : `${label(p)}:\n${fence(p.text)}`));
+  if (note.trim().length > 0) lines.push("", note.trim());
 
-  return [head, "", blocks.join("\n\n"), ...(note ? ["", note] : [])].join("\n");
+  return lines.join("\n");
 }
 
 /**

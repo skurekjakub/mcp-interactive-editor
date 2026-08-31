@@ -30,13 +30,20 @@ export function ReviewPanes({
   target,
   isDelete,
 }: ReviewPanesProps) {
-  const showEditor = !isDelete && view !== "diff";
+  /*
+   * The editor is never taken away. "diff" used to remove it outright, which
+   * left you looking at a change you could not touch — and the whole point of
+   * the panel is that the draft is yours to edit. It now shrinks instead, so the
+   * diff gets the room while the text stays in reach.
+   */
+  const showEditor = !isDelete;
   const showDiff = view !== "edit";
+  const compactEditor = view === "diff";
 
   return (
     <div className="panes" data-single={String(!showEditor || !showDiff)}>
       {showEditor ? (
-        <section className="pane">
+        <section className="pane" data-compact={String(compactEditor)}>
           <header className="pane-head">
             <span className="pane-title">Proposed — edit freely</span>
             <ViewToggle view={view} onChange={onViewChange} />

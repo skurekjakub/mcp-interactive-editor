@@ -95,11 +95,16 @@ for (const { rel, content } of planned) writeFileSync(join(ROOT, rel), content, 
 // Re-serialising JSON does not always agree with how prettier would print it,
 // and `npm run verify` runs `format:check`. Leaving the tree unformatted would
 // make a correct bump look like a failure.
-execFileSync("npx", ["prettier", "--write", ...planned.map((p) => p.rel)], {
-  cwd: ROOT,
-  stdio: "ignore",
-  shell: process.platform === "win32",
-});
+// Named directly rather than through a shell: `shell: true` concatenates argv
+// instead of escaping it, and node deprecated the combination for that reason.
+execFileSync(
+  process.platform === "win32" ? "npx.cmd" : "npx",
+  ["prettier", "--write", ...planned.map((p) => p.rel)],
+  {
+    cwd: ROOT,
+    stdio: "ignore",
+  },
+);
 
 process.stdout.write(
   `${current} -> ${next}\n${planned.map((p) => `  ${p.rel}`).join("\n")}\n\n` +

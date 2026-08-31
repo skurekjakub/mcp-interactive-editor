@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-31
+
+Everything here came from watching someone actually use the panel.
+
+### Added
+
+- **Every highlight carries its own comment.** There was one note box for the
+  whole batch, so a message came out as a pile of quotes with a single paragraph
+  underneath and the reader had to guess which remark belonged to which region.
+  Each highlight is now a row with its own field, and the comment is rendered as
+  a blockquote directly beneath the passage it is about.
+- **The tray docks to the foot of the panel and stays there.** It used to vanish
+  when the selection cleared, which meant re-selecting everything to add the
+  comment you forgot.
+- **Sending waits until every highlight has a comment.** The button says which
+  ones are outstanding rather than going quietly with half the question missing.
+
+### Changed
+
+- **Passages are sent in reading order, not clicking order.** Highlighting line
+  7 and then line 3 produced a message that opened at line 7, so "the first one"
+  meant nothing and the reader had to jump around the file to follow their own
+  question.
+- **The editor is never taken away.** The `diff` view used to remove it outright,
+  leaving a change on screen that could not be typed into — the one thing the
+  panel exists to allow. It now shrinks to give the diff room and stays editable.
+- The message header is the same shape for one passage as for ten, so a comment
+  can sit under any of them without the layout shifting.
+
 ## [0.2.1] — 2026-08-31
 
 ### Fixed
@@ -137,7 +166,8 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/skurekjakub/mcp-interactive-editor/releases/tag/v0.1.0

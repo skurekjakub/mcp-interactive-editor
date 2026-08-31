@@ -57,7 +57,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
   }, []);
 
   const { app, isConnected, error } = useApp({
-    appInfo: { name: "interactive-editor", version: "0.2.1" },
+    appInfo: { name: "interactive-editor", version: "0.3.0" },
     capabilities: {},
     onAppCreated: (instance) => {
       instance.ontoolresult = (result) => {

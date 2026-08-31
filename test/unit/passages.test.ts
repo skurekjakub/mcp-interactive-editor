@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  annotatePassage,
   attachPassage,
   describePassages,
+  isAnswered,
   passageFromRows,
   passageFromSelection,
   quotePassages,
   rangeOf,
+  sortPassages,
+  unanswered,
   type Passage,
 } from "../../shared/passages.js";
 
@@ -84,6 +88,63 @@ describe("attachPassage", () => {
   });
 });
 
+describe("annotatePassage", () => {
+  it("puts a comment on one passage and leaves the others alone", () => {
+    const before = [passage({ id: "a" }), passage({ id: "b" })];
+    const after = annotatePassage(before, "b", "why this?");
+
+    expect(after.find((p) => p.id === "b")?.note).toBe("why this?");
+    expect(after.find((p) => p.id === "a")?.note).toBeUndefined();
+  });
+
+  it("does nothing for an id that is not there", () => {
+    const before = [passage({ id: "a" })];
+    expect(annotatePassage(before, "nope", "x")).toEqual(before);
+  });
+});
+
+describe("isAnswered / unanswered", () => {
+  it("treats blank and whitespace-only comments as unanswered", () => {
+    expect(isAnswered(passage())).toBe(false);
+    expect(isAnswered(passage({ note: "" }))).toBe(false);
+    expect(isAnswered(passage({ note: "   \n  " }))).toBe(false);
+    expect(isAnswered(passage({ note: "ok" }))).toBe(true);
+  });
+
+  it("lists exactly the ones still waiting", () => {
+    const some = [
+      passage({ id: "a", note: "done" }),
+      passage({ id: "b" }),
+      passage({ id: "c", note: "  " }),
+    ];
+    expect(unanswered(some).map((p) => p.id)).toEqual(["b", "c"]);
+  });
+});
+
+describe("sortPassages", () => {
+  it("puts them in reading order, not clicking order", () => {
+    const clicked = [
+      passage({ id: "late", startLine: 7, endLine: 7 }),
+      passage({ id: "early", startLine: 3, endLine: 3 }),
+    ];
+    expect(sortPassages(clicked).map((p) => p.id)).toEqual(["early", "late"]);
+  });
+
+  it("breaks ties on where the region ends", () => {
+    const same = [
+      passage({ id: "long", startLine: 2, endLine: 9 }),
+      passage({ id: "short", startLine: 2, endLine: 3 }),
+    ];
+    expect(sortPassages(same).map((p) => p.id)).toEqual(["short", "long"]);
+  });
+
+  it("does not mutate what it was given", () => {
+    const clicked = [passage({ id: "b", startLine: 9 }), passage({ id: "a", startLine: 1 })];
+    sortPassages(clicked);
+    expect(clicked.map((p) => p.id)).toEqual(["b", "a"]);
+  });
+});
+
 describe("rangeOf", () => {
   it("names a single line", () => {
     expect(rangeOf(passage({ startLine: 7, endLine: 7 }))).toBe("line 7");
@@ -106,7 +167,11 @@ describe("quotePassages", () => {
   it("quotes one passage with its path and range", () => {
     const message = quotePassages("deploy.yml", [passage({ startLine: 3, endLine: 4 })], "");
 
-    expect(message).toContain("`deploy.yml`, lines 3–4:");
+    // The shape is the same for one passage as for ten: the file names itself
+    // once, then every region gets its own labelled block. A comment has to be
+    // able to sit under any of them without the header moving.
+    expect(message).toContain("`deploy.yml`:");
+    expect(message).toContain("lines 3–4:");
     expect(message).toContain("```\nhello\n```");
   });
 
@@ -153,5 +218,47 @@ describe("quotePassages", () => {
 
   it("falls back to the bare note when nothing is selected", () => {
     expect(quotePassages("deploy.yml", [], "just asking")).toBe("just asking");
+  });
+
+  it("emits passages in reading order, whatever order they were clicked in", () => {
+    const message = quotePassages(
+      "test.md",
+      [
+        passage({ id: "late", startLine: 7, endLine: 7, text: "seventh", source: "diff" }),
+        passage({ id: "early", startLine: 3, endLine: 3, text: "third", source: "diff" }),
+      ],
+      "",
+    );
+
+    expect(message.indexOf("line 3"), "line 3 must come first").toBeLessThan(
+      message.indexOf("line 7"),
+    );
+  });
+
+  it("puts each comment directly under the passage it belongs to", () => {
+    const message = quotePassages(
+      "test.md",
+      [
+        passage({ id: "a", startLine: 1, endLine: 1, text: "first", note: "why is this here?" }),
+        passage({ id: "b", startLine: 5, endLine: 5, text: "second", note: "and this?" }),
+      ],
+      "",
+    );
+
+    // Each comment is a blockquote immediately after its own fence, so no reader
+    // has to guess which remark belongs to which region.
+    expect(message).toContain("```\nfirst\n```\n> why is this here?");
+    expect(message).toContain("```\nsecond\n```\n> and this?");
+  });
+
+  it("quotes a multi-line comment on every line", () => {
+    const message = quotePassages("test.md", [passage({ note: "one\ntwo" })], "");
+    expect(message).toContain("> one\n> two");
+  });
+
+  it("leaves a passage bare when it has no comment yet", () => {
+    const message = quotePassages("test.md", [passage({ text: "solo" })], "");
+    expect(message).not.toContain(">");
+    expect(message.trimEnd().endsWith("```")).toBe(true);
   });
 });
