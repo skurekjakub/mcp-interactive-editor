@@ -21,6 +21,7 @@
  * Usage: npm run bump -- 0.3.0
  */
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,18 +93,24 @@ if (problems.length > 0) {
 
 for (const { rel, content } of planned) writeFileSync(join(ROOT, rel), content, "utf8");
 
-// Re-serialising JSON does not always agree with how prettier would print it,
-// and `npm run verify` runs `format:check`. Leaving the tree unformatted would
-// make a correct bump look like a failure.
-// Named directly rather than through a shell: `shell: true` concatenates argv
-// instead of escaping it, and node deprecated the combination for that reason.
+/*
+ * Re-serialising JSON does not always agree with how prettier would print it,
+ * and `npm run verify` runs `format:check`, so an unformatted tree makes a
+ * correct bump look like a failure.
+ *
+ * Prettier's own entry point is run under this node, rather than through `npx`:
+ * `shell: true` concatenates argv instead of escaping it and is deprecated for
+ * that reason, and spawning `npx.cmd` without a shell fails outright on Windows
+ * with EINVAL. Resolving the module sidesteps both.
+ */
 execFileSync(
-  process.platform === "win32" ? "npx.cmd" : "npx",
-  ["prettier", "--write", ...planned.map((p) => p.rel)],
-  {
-    cwd: ROOT,
-    stdio: "ignore",
-  },
+  process.execPath,
+  [
+    createRequire(import.meta.url).resolve("prettier/bin/prettier.cjs"),
+    "--write",
+    ...planned.map((p) => p.rel),
+  ],
+  { cwd: ROOT, stdio: "ignore" },
 );
 
 process.stdout.write(

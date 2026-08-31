@@ -6,6 +6,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-31
+
+The editor stops being a viewer and becomes the thing that decides.
+
+### Changed
+
+- **An opening call does not return until the review is over.** `propose_write`,
+  `propose_delete` and `open_file` now hold the tool call open. Accept the draft
+  with no comment and it commits, and the call returns the receipt. Comment on it
+  and that **is** the rejection: nothing is written, and the call returns the
+  human's words for the agent to redraft from.
+
+  Commenting and committing are exclusive on purpose. An agent told "written,
+  and here are some notes" treats the work as finished, which is the opposite of
+  what someone means by taking the time to say what is wrong with it. In the
+  panel, any comment disables the commit button and relabels it.
+
+  This works because the host mounts the View when the tool is _called_, not
+  when it returns, and lets the View call tools while that call is outstanding.
+  The panel is therefore alive before any result exists, and claims its proposal
+  through the new `editor_pending` using the arguments it was handed.
+
+- **Send finishes the call.** It used to go through `ui/message`, which only
+  ever drafts into the composer — every send needed a second click elsewhere to
+  actually go anywhere. It now resolves the waiting call directly.
+
+### Added
+
+- **The comment box opens above the selection**, in the pane you are reading,
+  rather than at the foot of the window. Highlighting three lines and then
+  travelling to the bottom of the panel puts the words and the thing they are
+  about as far apart as the layout allows. Placement is unit tested: above by
+  preference, flipped below only when there is no room, never off-screen.
+- The tray at the foot keeps the note that applies to everything, and the
+  highlights already pinned.
+- `--review-timeout-ms` and `--review-grace-ms`.
+
+### Fixed
+
+- Two ways a waiting call could hang, both closed. A host with no MCP Apps
+  support has nobody to wait for and gets the diff as text exactly as before; a
+  host that advertises support but never mounts the panel runs out a short grace
+  period and gets the same. Neither costs the agent a ten minute stall.
+
 ## [0.3.0] — 2026-08-31
 
 Everything here came from watching someone actually use the panel.
@@ -166,7 +210,8 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.1.0...v0.2.0
