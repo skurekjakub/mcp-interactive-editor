@@ -1,4 +1,4 @@
-import type { CommitReceipt } from "../../shared/types.js";
+import type { CommitReceipt, Proposal } from "../../shared/types.js";
 import { hasBlockers } from "../../shared/lint.js";
 import { countLines } from "../../shared/diff.js";
 import { sha256 } from "../fsGuard.js";
@@ -27,12 +27,56 @@ import type { ToolContext } from "./context.js";
  * @gate Carries the "nobody commits what nobody saw" invariant.
  */
 export async function commit(context: ToolContext, proposalId: string): Promise<CommitReceipt> {
-  const { guard } = context;
   const before = getProposal(proposalId);
 
   if (before.resolvedAt) {
     throw new Error(`This proposal was already ${before.resolution ?? "resolved"}.`);
   }
+
+  /*
+   * Claim the proposal before the first await.
+   *
+   * `resolvedAt` is not set until the write has finished, four awaits below, so
+   * two calls arriving together both read it as unset and both go on to write.
+   * On POSIX the second rename overwrites the first atomically: one approved
+   * proposal, two writes, two receipts saying it landed. Claiming synchronously
+   * is what makes the check mean what it reads as, and the panel's own busy flag
+   * cannot do it — that is React state, set a tick later than the click.
+   */
+  if (committing.has(proposalId)) {
+    throw new Error("This proposal is already being written. Wait for that to finish.");
+  }
+  committing.add(proposalId);
+  try {
+    return await write(context, proposalId, before);
+  } finally {
+    committing.delete(proposalId);
+  }
+}
+
+/**
+ * Proposals with a write in flight.
+ *
+ * Held for the duration of {@link commit} so a second entrant is refused rather
+ * than racing the first to `rename`.
+ */
+const committing = new Set<string>();
+
+/**
+ * Performs the write, once the proposal has been claimed.
+ *
+ * @param context - Guard, visibility settings and the host capability probe.
+ * @param proposalId - Which proposal to write.
+ * @param before - The proposal as it was when the claim was made.
+ * @returns A receipt describing exactly what landed.
+ * @throws {Error} When any re-checked condition refuses the write.
+ */
+async function write(
+  context: ToolContext,
+  proposalId: string,
+  before: Proposal,
+): Promise<CommitReceipt> {
+  const { guard } = context;
 
   /*
    * The load-bearing check, and the reason `attached` is not enough on its own.
@@ -60,7 +104,10 @@ export async function commit(context: ToolContext, proposalId: string): Promise<
   const baselineAtOpen = before.baseline;
   const { target, baseline } = await restatTarget(guard, before);
 
-  if (!target.absolute) {
+  // Bound once, so every write below is typed against the check rather than
+  // asserting past it and depending on this guard staying above them.
+  const absolute = target.absolute;
+  if (!absolute) {
     throw new Error(`${target.requested} is not a writable path.`);
   }
 
@@ -92,18 +139,14 @@ export async function commit(context: ToolContext, proposalId: string): Promise<
 
   const result =
     proposal.mode === "delete"
-      ? (await guard.remove(proposal.target.absolute!), { bytes: 0, sha256: sha256("") })
-      : await guard.commit(
-          proposal.target.absolute!,
-          proposal.content,
-          proposal.target.onDisk?.mode,
-        );
+      ? (await guard.remove(absolute), { bytes: 0, sha256: sha256("") })
+      : await guard.commit(absolute, proposal.content, proposal.target.onDisk?.mode);
 
   resolveProposal(proposalId, "committed");
 
   return {
     ok: true,
-    path: proposal.target.absolute!,
+    path: absolute,
     display: proposal.target.display,
     mode: proposal.mode,
     bytes: result.bytes,

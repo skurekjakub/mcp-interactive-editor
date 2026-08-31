@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { countLines, diffLines } from "../../shared/diff.js";
-import { DESTRUCTIVE_DELETION_RATIO, hasBlockers, lintProposal } from "../../shared/lint.js";
+import { countLines } from "../../shared/diff.js";
+import { composeState } from "../../shared/state.js";
+import { DESTRUCTIVE_DELETION_RATIO, hasBlockers } from "../../shared/lint.js";
 import type { Proposal, WriteMode } from "../../shared/types.js";
 
 function proposal(overrides: Partial<Proposal> = {}): Proposal {
@@ -32,7 +33,6 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
               bytes: baseline.length,
               lines: countLines(baseline),
               sha256: "x",
-              mtimeMs: 0,
               mode: 0o644,
             },
           }
@@ -42,10 +42,15 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
   };
 }
 
-/** Lint the way the server does: diff first, then check against those stats. */
-function lint(p: Proposal) {
-  const after = p.mode === "delete" ? "" : p.content;
-  return lintProposal(p, diffLines(p.baseline, after).stats);
+/**
+ * Lint through the assembly the server actually commits against.
+ *
+ * A private copy of "diff first, then lint against those stats" would leave this
+ * file — the one named for destructive-write blocking — passing while the
+ * assembly that gates a real commit computed something else entirely.
+ */
+function lint(p: Proposal, roots: string[] = ["/root"]) {
+  return composeState(p, { roots, dryRun: false, serverVersion: "test" }).findings;
 }
 
 const ids = (p: Proposal) => lint(p).map((f) => f.id);
@@ -67,6 +72,33 @@ describe("path checks", () => {
     const findings = lint(proposal({ mode: "overwrite", baseline: "", content: "new\n" }));
     expect(findings.find((f) => f.id === "overwrite-missing")?.severity).toBe("warning");
     expect(hasBlockers(findings)).toBe(false);
+  });
+
+  it("tells the human which check refused the path, not just that one did", () => {
+    // Arrange: a file inside a root that the deny list caught.
+    const denied = proposal({
+      content: "x\n",
+      target: { absolute: null, rejection: "denied", deniedBy: ".env" } as never,
+    });
+
+    // Act.
+    const finding = lint(denied).find((f) => f.id === "path-unresolved");
+
+    // Assert: naming the deny pattern is the difference between a fixable
+    // refusal and one that reports a file as being outside its own project.
+    expect(finding?.detail).toContain(".env");
+    expect(finding?.detail).not.toContain("outside");
+  });
+
+  it("lists the writable roots when the path really is outside them", () => {
+    const outside = proposal({
+      content: "x\n",
+      target: { absolute: null, rejection: "outside-roots" } as never,
+    });
+
+    const finding = lint(outside, ["/only/here"]).find((f) => f.id === "path-unresolved");
+
+    expect(finding?.detail).toContain("/only/here");
   });
 
   it("notes that a traversal path was normalised", () => {
@@ -215,5 +247,69 @@ describe("ordering", () => {
 
     expect(findings[0].severity).toBe("blocker");
     expect(findings.at(-1)?.severity).toBe("info");
+  });
+});
+
+describe("changes the diff cannot show", () => {
+  it("warns when a CRLF file would be rewritten to LF", () => {
+    // Arrange: lines compare equal once terminators are stripped, so the diff is
+    // empty and every finding except this one is silent.
+    const crlf = proposal({ baseline: "one\r\ntwo\r\n", content: "one\ntwo\n" });
+
+    // Act.
+    const finding = lint(crlf).find((f) => f.id === "eol-rewrite");
+
+    // Assert: the write rewrites every line in the file, so it has to be said.
+    expect(finding?.severity).toBe("warning");
+    expect(finding?.fix?.content).toBe("one\r\ntwo\r\n");
+  });
+
+  it("still catches the opposite direction", () => {
+    const lf = proposal({ baseline: "one\ntwo\n", content: "one\r\ntwo\r\n" });
+
+    expect(ids(lf)).toContain("eol-mismatch");
+  });
+
+  it("says nothing when both sides agree on CRLF", () => {
+    const same = proposal({ baseline: "one\r\ntwo\r\n", content: "one\r\nTWO\r\n" });
+
+    expect(ids(same)).not.toContain("eol-rewrite");
+  });
+
+  it("reports a change that is only the newline at the end of the file", () => {
+    const finding = lint(proposal({ baseline: "a\nb", content: "a\nb\n" })).find(
+      (f) => f.id === "newline-at-eof",
+    );
+
+    expect(finding?.severity).toBe("info");
+  });
+});
+
+describe("content the caller controls the size of", () => {
+  it("finds trailing whitespace without scanning quadratically", () => {
+    // Arrange: a long run of spaces the line does not end with. An anchored
+    // `/[ \t]+$/m` gives one character back per attempt from every offset, which
+    // is minutes of a blocked event loop at this size.
+    const hostile = `${" ".repeat(40_000)}x\ntrailing   \n`;
+
+    // Act.
+    const started = Date.now();
+    const finding = lint(proposal({ content: hostile })).find(
+      (f) => f.id === "trailing-whitespace",
+    );
+    const elapsed = Date.now() - started;
+
+    // Assert: the run before the `x` is not trailing whitespace; the spaces
+    // before the second newline are.
+    expect(finding?.fix?.content).toBe(`${" ".repeat(40_000)}x\ntrailing\n`);
+    expect(elapsed).toBeLessThan(1_000);
+  });
+
+  it("leaves line endings and the final newline alone when stripping", () => {
+    const finding = lint(proposal({ baseline: "x\r\n", content: "a  \r\nb\t\r\n" })).find(
+      (f) => f.id === "trailing-whitespace",
+    );
+
+    expect(finding?.fix?.content).toBe("a\r\nb\r\n");
   });
 });

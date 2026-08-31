@@ -141,6 +141,23 @@ if (!context.blockOnReview) return opened;
 const pointer = useRef<{ x: number; y: number } | null>(null);
 ```
 
+### `eslint-disable` placement
+
+An `eslint-disable` comment may sit anywhere except **between a docblock and the
+declaration it documents** — that separates the two, and the checker reports the
+declaration as undocumented. Put it above the docblock, or inside the function
+body on the line it applies to.
+
+```ts
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+/**
+ * Wrong: the docblock no longer belongs to anything.
+ */
+```
+
+Every disable carries a comment saying why the rule is wrong here. A bare
+disable is an unexplained exception to a rule the build otherwise enforces.
+
 ---
 
 ## 5. Test Comment Markers (Arrange / Act / Assert)

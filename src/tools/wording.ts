@@ -1,13 +1,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type {
-  CommitReceipt,
-  EditorState,
-  PathRejection,
-  ProposalHandle,
-  TargetInfo,
-} from "../../shared/types.js";
+import type { EditorState, ProposalHandle } from "../../shared/types.js";
 import { endsWithNewline, formatUnifiedDiff } from "../../shared/diff.js";
-import { diffStatsFor } from "../proposals.js";
+import { explainRejection } from "../../shared/rejection.js";
+import { proposedContent } from "../../shared/state.js";
 import type { ToolContext } from "./context.js";
 
 /**
@@ -32,6 +27,15 @@ import type { ToolContext } from "./context.js";
 export const MODEL_DIFF_LINE_BUDGET = 80;
 
 /**
+ * The same budget in characters, for a diff whose lines are enormous.
+ *
+ * A line budget alone counts a two-megabyte single-line file as one line and
+ * hands all of it over, which is the whole cost the claim ticket exists to
+ * avoid — and it does it silently, with no truncation note.
+ */
+export const MODEL_DIFF_CHAR_BUDGET = 8_000;
+
+/**
  * Builds the claim ticket an opening tool returns.
  *
  * @param state - The freshly opened editor state.
@@ -47,43 +51,6 @@ export function handleFor(state: EditorState): ProposalHandle {
       ? {}
       : { refused: true, rejection: proposal.target.rejection ?? "unresolvable" }),
   };
-}
-
-/**
- * Explains why a path was refused, naming the check that refused it.
- *
- * Collapsing every rejection into "outside the roots" reports a file inside the
- * project as being outside it, directly above the root that contains it, which
- * cannot be debugged from the message.
- *
- * @param target - The refused target.
- * @param roots - The configured writable roots, for the "outside" case.
- * @returns A sentence naming the failed check.
- */
-export function explainRejection(target: TargetInfo, roots: string[]): string {
-  const reason: PathRejection = target.rejection ?? "unresolvable";
-  const quoted = `"${target.requested}"`;
-
-  switch (reason) {
-    case "outside-roots":
-      return (
-        `Refused: ${quoted} is outside the roots this editor will write to.\n` +
-        `Writable roots:\n${roots.map((r) => `  ${r}`).join("\n")}`
-      );
-    case "denied":
-      return (
-        `Refused: ${quoted} matches the deny list${target.deniedBy ? ` (${target.deniedBy})` : ""}, ` +
-        `so this editor will not touch it even though it is inside a writable root. ` +
-        `Start the server with --deny to choose your own patterns.`
-      );
-    case "not-a-file":
-      return `Refused: ${quoted} is a directory, not a file.`;
-    case "too-large":
-      return `Refused: ${quoted} is too large to review in an editor.`;
-    case "unresolvable":
-    default:
-      return `Refused: ${quoted} could not be resolved to a path on disk.`;
-  }
 }
 
 /**
@@ -121,7 +88,7 @@ export function openerResult(state: EditorState): CallToolResult {
   const refused = !state.proposal.target.absolute;
   return {
     content: [{ type: "text", text: describeState(state) }],
-    structuredContent: handleFor(state) as unknown as Record<string, unknown>,
+    structuredContent: handleFor(state),
     ...(refused ? { isError: true } : {}),
   };
 }
@@ -146,7 +113,7 @@ export function openedFileResult(state: EditorState): CallToolResult {
 
   return {
     content: [{ type: "text", text }],
-    structuredContent: handleFor(state) as unknown as Record<string, unknown>,
+    structuredContent: handleFor(state),
     ...(target.absolute ? {} : { isError: true }),
   };
 }
@@ -164,7 +131,7 @@ export function openedFileResult(state: EditorState): CallToolResult {
 export function panelResult(state: EditorState, note: string): CallToolResult {
   return {
     content: [{ type: "text", text: note }],
-    structuredContent: state as unknown as Record<string, unknown>,
+    structuredContent: state,
   };
 }
 
@@ -179,7 +146,7 @@ export function describeState(state: EditorState): string {
 
   if (!proposal.target.absolute) return explainRejection(proposal.target, state.roots);
 
-  const stats = diffStatsFor(proposal);
+  const { stats } = state;
   const lines: string[] = [
     `Editor open — nothing has been written.`,
     ``,
@@ -218,36 +185,28 @@ export function describeState(state: EditorState): string {
  */
 export function diffForModel(state: EditorState): string {
   const { proposal } = state;
-  const after = proposal.mode === "delete" ? "" : proposal.content;
   const full = formatUnifiedDiff(state.diff, proposal.target.display, {
     before: endsWithNewline(proposal.baseline),
-    after: endsWithNewline(after),
+    after: endsWithNewline(proposedContent(proposal)),
   });
   const lines = full.split("\n");
-  if (lines.length <= MODEL_DIFF_LINE_BUDGET) return full;
+  if (lines.length <= MODEL_DIFF_LINE_BUDGET && full.length <= MODEL_DIFF_CHAR_BUDGET) return full;
 
+  const kept: string[] = [];
+  let spent = 0;
+  for (const text of lines.slice(0, MODEL_DIFF_LINE_BUDGET)) {
+    if (spent + text.length > MODEL_DIFF_CHAR_BUDGET) break;
+    kept.push(text);
+    spent += text.length + 1;
+  }
+
+  const dropped = lines.length - kept.length;
   return [
-    ...lines.slice(0, MODEL_DIFF_LINE_BUDGET),
-    `… and ${lines.length - MODEL_DIFF_LINE_BUDGET} more diff lines, shown in full in the panel.`,
+    ...kept,
+    dropped > 0
+      ? `… and ${dropped} more diff lines, shown in full in the panel.`
+      : `… truncated at ${MODEL_DIFF_CHAR_BUDGET} characters. The panel shows all of it.`,
   ].join("\n");
-}
-
-/**
- * Describes what a commit actually did.
- *
- * @param receipt - The receipt returned by the commit path.
- * @returns One sentence naming the file, its size and whether it was edited.
- */
-export function describeReceipt(receipt: CommitReceipt): string {
-  const verb = receipt.mode === "delete" ? "Deleted" : "Wrote";
-  const edited = receipt.editedByHuman
-    ? " The human edited your proposal before approving it — the content above is what actually landed."
-    : "";
-  return (
-    `${verb} ${receipt.display} (${receipt.lines} lines, ${receipt.bytes} bytes).` +
-    (receipt.dryRun ? " DRY RUN — nothing reached disk." : "") +
-    edited
-  );
 }
 
 /**

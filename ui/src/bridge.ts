@@ -1,9 +1,21 @@
 import type { App } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult, ContentBlock } from "@modelcontextprotocol/sdk/types.js";
 import type { EditorState, Proposal } from "../../shared/types.js";
-import { countLines, diffLines } from "../../shared/diff.js";
-import { lintProposal } from "../../shared/lint.js";
+import { countLines } from "../../shared/diff.js";
+import { composeState, type StateContext } from "../../shared/state.js";
 import { PANEL_VERSION } from "./lib/version.js";
+
+/**
+ * The world the preview pretends to run in.
+ *
+ * Dry run is not negotiable here: the preview has no server behind it, and a
+ * fixture that reported otherwise would be teaching the wrong reflex.
+ */
+const PREVIEW_CONTEXT: StateContext = {
+  roots: ["/preview"],
+  dryRun: true,
+  serverVersion: PANEL_VERSION,
+};
 
 /**
  * Everything the View needs from the outside world, behind one small interface.
@@ -43,8 +55,7 @@ export function isPreview(): boolean {
  */
 export function hostBridge(app: App): Bridge {
   return {
-    callTool: (name, args) =>
-      app.callServerTool({ name, arguments: args }) as Promise<CallToolResult>,
+    callTool: (name, args) => app.callServerTool({ name, arguments: args }),
     updateModelContext: (params) => app.updateModelContext(params),
     sendMessage: (text) => app.sendMessage({ role: "user", content: [{ type: "text", text }] }),
   };
@@ -125,7 +136,6 @@ function previewProposal(): Proposal {
         bytes: PREVIEW_BASELINE.length,
         lines: countLines(PREVIEW_BASELINE),
         sha256: "preview",
-        mtimeMs: 0,
         mode: 0o644,
       },
     },
@@ -150,18 +160,7 @@ function previewProposal(): Proposal {
 export function previewBridge(): Bridge {
   let proposal = previewProposal();
 
-  const state = (): EditorState => {
-    const after = proposal.mode === "delete" ? "" : proposal.content;
-    const { hunks, stats } = diffLines(proposal.baseline, after);
-    return {
-      proposal,
-      findings: lintProposal(proposal, stats),
-      diff: hunks,
-      roots: ["/preview"],
-      dryRun: true,
-      serverVersion: PANEL_VERSION,
-    };
-  };
+  const state = (): EditorState => composeState(proposal, PREVIEW_CONTEXT);
 
   const ok = (structuredContent: unknown, text: string): CallToolResult => ({
     content: [{ type: "text", text }],
@@ -205,7 +204,7 @@ export function previewBridge(): Bridge {
               display: proposal.target.display,
               mode: proposal.mode,
               bytes: proposal.content.length,
-              lines: proposal.content.split("\n").length,
+              lines: countLines(proposal.content),
               sha256: "preview0000000000000000000000000000000000000000000000000000000000",
               dryRun: true,
               editedByHuman: proposal.content !== proposal.originalContent,
@@ -234,14 +233,5 @@ export function previewBridge(): Bridge {
  * @returns Fixture state, complete with a real diff and real findings.
  */
 export function previewState(): EditorState {
-  const proposal = previewProposal();
-  const { hunks, stats } = diffLines(proposal.baseline, proposal.content);
-  return {
-    proposal,
-    findings: lintProposal(proposal, stats),
-    diff: hunks,
-    roots: ["/preview"],
-    dryRun: true,
-    serverVersion: PANEL_VERSION,
-  };
+  return composeState(previewProposal(), PREVIEW_CONTEXT);
 }

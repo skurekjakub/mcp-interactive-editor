@@ -1,7 +1,7 @@
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import type { CommitReceipt, Finding, Proposal } from "../../shared/types.js";
-import { diffLines } from "../../shared/diff.js";
-import { hasBlockers, lintProposal } from "../../shared/lint.js";
+import { hasBlockers } from "../../shared/lint.js";
+import { composeState } from "../../shared/state.js";
 import { isAnswered, type Passage } from "../../shared/passages.js";
 import { isPreview } from "./bridge.js";
 import { useCommitFlow } from "./hooks/useCommitFlow.js";
@@ -61,21 +61,26 @@ export function App() {
     onFailure: setFailure,
   });
 
+  // Pulled off the tray so the dependency arrays name the functions themselves.
+  // A member expression is opaque to the exhaustive-deps check, which is the
+  // check that catches a callback closing over a stale tray.
+  const { select: selectPassage, pin: pinPassage } = tray;
+
   const onSelect = useCallback(
     (passage: Passage | null, at: SelectionAnchor | null, byPointer: boolean) => {
-      tray.select(passage);
+      selectPassage(passage);
       setAnchor(at);
       setFromPointer(byPointer);
     },
-    [tray.select],
+    [selectPassage],
   );
 
   const onAddComment = useCallback(
     (passage: Passage, note: string) => {
-      tray.pin(note ? { ...passage, note } : passage);
+      pinPassage(note ? { ...passage, note } : passage);
       setAnchor(null);
     },
-    [tray.pin],
+    [pinPassage],
   );
 
   const applyFix = useCallback(
@@ -106,9 +111,8 @@ export function App() {
       content: deferred,
       destructiveAcknowledged: ack,
     };
-    const after = proposal.mode === "delete" ? "" : deferred;
-    const { hunks, stats } = diffLines(proposal.baseline, after);
-    return { proposal, hunks, stats, findings: lintProposal(proposal, stats) };
+    const next = composeState(proposal, state);
+    return { proposal, hunks: next.diff, stats: next.stats, findings: next.findings };
   }, [state, deferred, ack]);
 
   if (session.hostError && !isPreview()) {
@@ -211,8 +215,14 @@ export function App() {
         writable={proposal.target.absolute !== null && state.proposal.attached}
         unchanged={unchanged}
         label={commitLabel(proposal, content, state.dryRun)}
-        onCommit={commit}
-        onDiscard={discard}
+        /*
+         * Voided explicitly. Handing an async function to a void-returning prop
+         * leaves its rejection unobserved, and both of these are the paths that
+         * write to disk — a failure nobody catches there is a panel that looks
+         * as though it worked. Both already report through `onFailure`.
+         */
+        onCommit={() => void commit()}
+        onDiscard={() => void discard()}
       />
 
       {session.failure ? <div className="status status-error">{session.failure}</div> : null}

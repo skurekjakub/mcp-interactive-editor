@@ -11,7 +11,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { PathRejection, TargetInfo } from "../shared/types.js";
 import { countLines } from "../shared/diff.js";
 
@@ -64,7 +64,7 @@ export const DEFAULT_DENY = [
 export const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 /** A path that cannot be used, carrying which check refused it. */
-export class PathRejected extends Error {
+class PathRejected extends Error {
   constructor(
     message: string,
     readonly reason: PathRejection | "unreadable",
@@ -184,7 +184,6 @@ export class FsGuard {
         bytes: info.size,
         lines: countLines(body),
         sha256: sha256(body),
-        mtimeMs: info.mtimeMs,
         mode: info.mode,
       };
     } catch (error) {
@@ -355,7 +354,10 @@ async function realpathDeepest(target: string): Promise<string> {
     } catch {
       const parent = dirname(current);
       if (parent === current) throw new Error(`Cannot resolve ${target}`);
-      missing.push(current.slice(parent.length + 1));
+      // `basename`, not a slice past the parent: a filesystem root already ends
+      // with its separator, so measuring one past it drops the first character
+      // of the segment — and the write lands on a path nobody asked for.
+      missing.push(basename(current));
       current = parent;
     }
   }

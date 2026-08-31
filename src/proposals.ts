@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
 import type { EditorState, Proposal, Resolution, TargetInfo, WriteMode } from "../shared/types.js";
-import { diffLines } from "../shared/diff.js";
-import { lintProposal } from "../shared/lint.js";
-import { FsGuard, sha256 } from "./fsGuard.js";
+import { composeState } from "../shared/state.js";
+import type { FsGuard } from "./fsGuard.js";
+import { sha256 } from "./fsGuard.js";
 import { SERVER_VERSION } from "./version.js";
 
 /**
@@ -28,6 +27,16 @@ const MAX_RETAINED = 32;
 
 /** How long an unresolved proposal stays claimable, in milliseconds. */
 const PROPOSAL_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * How proposals ended that have since been dropped to make room.
+ *
+ * The id alone outlives the proposal, so a panel that comes back to one can be
+ * told what happened to it. Without this the only honest answer is that the id
+ * is unknown, which reads as a server restart and sends whoever is debugging it
+ * to the wrong place entirely.
+ */
+const evicted = new Map<string, Resolution>();
 
 /** What a caller must supply to open a proposal. */
 export interface ProposalInput {
@@ -67,7 +76,7 @@ export async function createProposal(guard: FsGuard, input: ProposalInput): Prom
         : "";
 
   for (const open of openProposals()) {
-    if (samePath(open.target.requested, input.path)) resolveProposal(open.proposalId, "superseded");
+    if (sameTarget(open.target, target)) resolveProposal(open.proposalId, "superseded");
   }
 
   const proposal: Proposal = {
@@ -98,6 +107,10 @@ export async function createProposal(guard: FsGuard, input: ProposalInput): Prom
 export function getProposal(proposalId: string): Proposal {
   const proposal = proposals.get(proposalId);
   if (!proposal) {
+    const ended = evicted.get(proposalId);
+    if (ended) {
+      throw new Error(`This proposal was ${ended} to make room for newer ones. Open a new one.`);
+    }
     throw new Error(
       `Unknown proposal ${proposalId}. It probably belongs to a previous run of the server.`,
     );
@@ -183,28 +196,11 @@ export function isStale(baselineNow: string, baselineAtOpen: string): boolean {
  * @returns The complete editor state.
  */
 export function buildEditorState(guard: FsGuard, proposal: Proposal): EditorState {
-  const after = proposal.mode === "delete" ? "" : proposal.content;
-  const { hunks, stats } = diffLines(proposal.baseline, after);
-
-  return {
-    proposal,
-    findings: lintProposal(proposal, stats),
-    diff: hunks,
+  return composeState(proposal, {
     roots: guard.roots,
     dryRun: guard.dryRun,
     serverVersion: SERVER_VERSION,
-  };
-}
-
-/**
- * Counts what a proposal adds and removes.
- *
- * @param proposal - The proposal to measure.
- * @returns Added and removed line counts.
- */
-export function diffStatsFor(proposal: Proposal) {
-  const after = proposal.mode === "delete" ? "" : proposal.content;
-  return diffLines(proposal.baseline, after).stats;
+  });
 }
 
 /**
@@ -228,7 +224,7 @@ export function findOpenProposal(path?: string): Proposal | undefined {
 
   // A host is free to normalise a path on the way through — slashes, case,
   // relative to absolute — so an exact string match is not the only match.
-  const resolved = open.filter((p) => samePath(p.target.requested, path));
+  const resolved = open.filter((p) => namesTarget(p.target, path));
   if (resolved.length > 0) return resolved[resolved.length - 1];
 
   /*
@@ -244,19 +240,68 @@ export function findOpenProposal(path?: string): Proposal | undefined {
 }
 
 /**
- * Reports whether two paths name the same file.
+ * Reports whether two resolved targets name the same file.
  *
- * @param a - One path, in any spelling.
- * @param b - The other path, in any spelling.
- * @returns True when both resolve to the same location.
+ * The guard has already resolved both, against the configured root and through
+ * every symlink. Re-resolving the requested spelling instead would resolve it
+ * against the working directory, which is not the root in the shipped bundle —
+ * two spellings of one file would then compare unequal, no supersede would fire,
+ * and two live drafts of the same file would each commit and each report
+ * success, the older one silently overwriting the newer.
+ *
+ * Compared verbatim, without case folding: on a case-sensitive filesystem
+ * `a.txt` and `A.txt` are different files, and folding them together would close
+ * a review the human still has open.
+ *
+ * @param a - One resolved target.
+ * @param b - The other resolved target.
+ * @returns True when both resolved to the same location.
  */
-function samePath(a: string, b: string): boolean {
-  const normalise = (p: string) => resolve(p).split("\\").join("/").toLowerCase();
-  try {
-    return normalise(a) === normalise(b);
-  } catch {
-    return false;
-  }
+function sameTarget(a: TargetInfo, b: TargetInfo): boolean {
+  return a.absolute !== null && a.absolute === b.absolute;
+}
+
+/**
+ * Comparison that matches how the running filesystem treats names.
+ *
+ * Windows and the default macOS volume fold case; Linux does not, and folding
+ * there would let one file's spelling claim another file's proposal.
+ */
+const foldsCase = process.platform === "win32" || process.platform === "darwin";
+
+/**
+ * Normalises a path for comparison without resolving it.
+ *
+ * Resolving would anchor a relative path to the working directory, which is not
+ * where the guard anchors it.
+ *
+ * @param p - The path to normalise.
+ * @returns The path with one separator style, folded if the filesystem folds.
+ */
+function forCompare(p: string): string {
+  const slashed = p.split("\\").join("/");
+  return foldsCase ? slashed.toLowerCase() : slashed;
+}
+
+/**
+ * Reports whether a path the host echoed back names this target.
+ *
+ * The host may hand the panel any spelling of the argument it was given, so the
+ * already-resolved absolute path is what it is measured against. A relative
+ * spelling is matched as a trailing segment of that path rather than resolved,
+ * because the working directory is not the root the guard resolved against.
+ *
+ * @param target - The proposal's resolved target.
+ * @param path - The spelling the panel was handed.
+ * @returns True when the path names this target.
+ */
+function namesTarget(target: TargetInfo, path: string): boolean {
+  const wanted = forCompare(path);
+  if (forCompare(target.requested) === wanted) return true;
+  if (!target.absolute) return false;
+
+  const absolute = forCompare(target.absolute);
+  return absolute === wanted || absolute.endsWith(`/${wanted}`);
 }
 
 /**
@@ -270,19 +315,32 @@ export function openProposals(): Proposal[] {
 }
 
 /**
- * Drops resolved and aged-out proposals down to the retention limit.
+ * Trims the store back to the retention limit.
  *
- * Insertion order is creation order, so the oldest entries are evicted first.
+ * Resolved and aged-out proposals go first, so one still awaiting a decision is
+ * dropped only when nothing else can be. A resolved proposal is kept while there
+ * is room for it: a panel returning to a closed proposal should be told it was
+ * closed, and a store that has forgotten it can only say the id is unknown,
+ * which reads as a server restart and sends the reader looking in the wrong
+ * place.
+ *
+ * Insertion order is creation order, so the oldest entries go first.
  */
 function evict() {
+  if (proposals.size <= MAX_RETAINED) return;
+
   const cutoff = Date.now() - PROPOSAL_TTL_MS;
   for (const [id, proposal] of proposals) {
+    if (proposals.size <= MAX_RETAINED) return;
     if (proposal.resolvedAt || proposal.createdAt < cutoff) proposals.delete(id);
-    if (proposals.size <= MAX_RETAINED) break;
   }
   while (proposals.size > MAX_RETAINED) {
     const oldest = proposals.keys().next().value;
     if (oldest === undefined) break;
+    // Closed before it is forgotten, so a panel still holding this id is told
+    // the proposal was superseded rather than that the server does not know it.
+    const doomed = proposals.get(oldest);
+    if (doomed && !doomed.resolvedAt) evicted.set(oldest, "superseded");
     proposals.delete(oldest);
   }
 }
@@ -290,8 +348,9 @@ function evict() {
 /**
  * Empties the store.
  *
- * @remarks Exists for tests, which must not inherit state across cases.
+ * @remarks Exists for tests, which must not inherit proposals across cases.
  */
 export function clearProposals(): void {
   proposals.clear();
+  evicted.clear();
 }

@@ -351,8 +351,11 @@ ever attached to.
 
 ## Options
 
+There is no installed binary — this is not published to npm. The server is a
+script, launched by whatever config points your host at it:
+
 ```
-mcp-interactive-editor --root <dir> [--root <dir> ...] [options]
+node bundle/server/index.js --root <dir> [--root <dir> ...] [options]
 
   --root <dir>                 A directory the editor may write inside. Required, repeatable.
   --root-from-cwd              Add the working directory as a root.

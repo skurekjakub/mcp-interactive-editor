@@ -32,6 +32,23 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint
+        # Type-aware linting reads the same tsconfigs on every platform and
+        # cannot disagree between them, so once is enough.
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run lint
+
+      - name: Dead code and unused dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run lint:dead
+
+      - name: Audit what ships
+        # Only the runtime dependencies. Dev-only advisories with no fix
+        # available would red-line every run over a packing tool no user
+        # installs.
+        if: matrix.os == 'ubuntu-latest'
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Format
         run: npm run format:check
 

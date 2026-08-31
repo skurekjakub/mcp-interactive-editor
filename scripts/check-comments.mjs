@@ -222,10 +222,14 @@ function checkNarrative(file, text) {
  * @param text - Full source text.
  */
 function checkTestMarkers(file, text) {
+  // One step may cover two phases — a `toThrow` is the act and the assertion at
+  // once — so the marker names each phase it covers before its punctuation.
+  const marker = /^\s*\/\/\s*((?:Arrange|Act|Assert)(?:\s*&\s*(?:Arrange|Act|Assert))*)(.?)/;
+
   text.split("\n").forEach((entry, index) => {
-    const marker = entry.match(/^\s*\/\/\s*(Arrange|Act|Assert)(.?)/);
-    if (marker && marker[2] !== "." && marker[2] !== ":") {
-      report(file, index + 1, `'// ${marker[1]}' marker must end with '.' or continue with ':'`);
+    const found = entry.match(marker);
+    if (found && found[2] !== "." && found[2] !== ":") {
+      report(file, index + 1, `'// ${found[1]}' marker must end with '.' or continue with ':'`);
     }
   });
 }

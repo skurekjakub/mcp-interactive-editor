@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { pathInput } from "./limits.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, createProposal } from "../proposals.js";
 import { VIEW_URI, type ToolContext } from "./context.js";
-import { openedFileResult, outcomeDescription } from "./results.js";
+import { openedFileResult, outcomeDescription } from "./wording.js";
 import { waitForReview } from "./awaitReview.js";
 
 /**
@@ -27,9 +28,9 @@ export function registerOpenFile(server: McpServer, context: ToolContext): void 
         "if you need to see it too. " +
         outcomeDescription(context),
       inputSchema: {
-        path: z
-          .string()
-          .describe("File to open. Absolute, or relative to the first configured root."),
+        path: pathInput.describe(
+          "File to open. Absolute, or relative to the first configured root.",
+        ),
         note: z
           .string()
           .optional()

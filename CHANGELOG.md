@@ -6,6 +6,109 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-31
+
+Four more audits — bug hunting, refactoring, tooling and test quality — each
+verified against the vendored specifications, and every defect below reproduced
+before it was changed.
+
+### Fixed
+
+- **A flag could eat the next flag.** `--deny --dry-run` took `--dry-run` as the
+  deny pattern and left a server that writes to disk when it was asked to
+  simulate. A value that begins with a dash and a letter is now refused, naming
+  the flag that followed and pointing at `--flag=value` for the rare case where
+  that really is the value.
+- **Two live drafts of one file could both commit.** The supersede check
+  re-resolved the requested path against the working directory while the guard
+  resolved it against the configured root. Where those differ — which is the
+  shipped `.mcpb` configuration — two spellings of one file compared unequal,
+  nothing was superseded, and the older draft landed last over the newer one with
+  both reporting success. Resolved targets are now compared directly, and without
+  case folding, which would have closed a live review on a case-sensitive
+  filesystem.
+- **A CRLF file rewritten to LF showed an empty diff and no findings.** Lines are
+  compared with their terminators stripped, so every line ending in the file
+  could change while the panel reported no change at all — under a live Save
+  button. It now says so, and offers to keep the file's own endings.
+- **The trailing-whitespace check was quadratic.** A long run of spaces the line
+  did not end with took minutes rather than milliseconds, on a scan that runs on
+  every keystroke in the panel and again before every commit. It is a linear pass
+  now, and preserves CRLF and the final newline.
+- **The diff budget bounded each side rather than the table.** A short file
+  against an enormous one was under the per-side limit on one side and allocated
+  gigabytes. The bound is on the product now.
+- **A missing path segment lost a character** when the walk up reached the
+  filesystem root, because a root already ends with its separator. The write went
+  to a path nobody asked for — and, with the wrong root, one still inside it.
+- **Two concurrent commits both cleared the resolved check**, which is not
+  reached until after the write. On POSIX that is one approved proposal, two
+  writes and two receipts. A proposal is now claimed before the first `await`.
+- **Nothing capped what a tool call carried.** `path` and `content` had no
+  bounds, so a proposal could be larger than any file this editor would agree to
+  open, and an over-long path failed at `rename` with a raw errno quoting an
+  internal temp name. Both are bounded at the schema now.
+- **The model diff was capped in lines, not characters**, so a single enormous
+  line was handed over whole with no truncation note.
+- **The panel round-tripped twice on every mount.** Both the claim and the attach
+  effect wrote the phase they depended on, so each cancelled its own first call
+  and started again — two re-reads of the file, and two attaches whose stored
+  baselines could differ.
+- **A cancelled session reported itself as attaching.** The phase description
+  defaulted, so the one phase that means "stop waiting" read as progress.
+- **The panel and the model gave different accounts of a refused path.** The
+  model was told which check refused it; the human got a single collapsed
+  sentence. Both now read the same explanation.
+- **The commit gate had no type behind it.** The SDK's capability helper names a
+  type its own package does not export, so its return value resolved to the error
+  type and every property read off it checked against nothing. The shape is
+  verified explicitly now, and covered by unit tests rather than only by a
+  subprocess.
+- **CI ran the panel suite on an unsupported Node.** `.nvmrc` pinned 20.10.0
+  while jsdom, undici and whatwg-url all require newer. Pinned to 22 with
+  `engine-strict` so the mismatch cannot come back quietly.
+
+### Changed
+
+- Assembling the editor state, explaining a refusal and describing a commit each
+  live in one place in `shared/`. There were four copies of the first, and one of
+  them had already reintroduced a line-count defect fixed elsewhere.
+- Command-line parsing moved to `src/cli.ts`, reading its environment, working
+  directory and home directory as arguments — so every decision it makes is
+  reachable from a unit test rather than only from a spawned server.
+- `src/tools/results.ts` is now `src/tools/wording.ts`, which is what its own
+  module docblock already called it, and no longer collides with the panel's
+  `results.ts`.
+- The commit tool declares its annotations. Under `--terminal-approval` the
+  client's own approve/deny prompt is the entire gate, and that prompt is
+  rendered from them.
+- A proposal dropped to make room is remembered as superseded, so a panel holding
+  its id is told what happened rather than that the server does not know it.
+- The unused `files` field is gone from `package.json`, and the README no longer
+  documents a command-line binary that does not exist.
+
+### Added
+
+- ESLint, type-aware, in `npm run verify` and CI, along with `knip` for dead
+  exports and `npm audit --omit=dev` for what actually ships.
+- Tests for the command line, the commit gate's host check, the proposal store,
+  the input bounds and the commit threshold. The threshold had five conditions
+  keeping the button shut and no test held any of them.
+- A finding for a change that alters only the newline at the end of a file, which
+  the diff cannot show.
+
+### Testing
+
+- Removed assertions that could not fail: an editor `disabled` property never
+  set, a truthiness check on an already-filtered list, a temp-file check keyed to
+  a string copied out of the implementation, and a declaration-count floor below
+  the true count. Each was replaced by one that fails when the behaviour breaks.
+- The review-gate tests get their own server. They shared a grace period pinned
+  short for the opposite reason and lost the race roughly one shuffled run in
+  three.
+- The claim test now opens two proposals. With one open it took the single-open
+  fallback and passed only because earlier tests had left proposals behind.
+
 ## [0.6.0] - 2026-08-31
 
 Four independent audits of the whole surface — server, panel, build and one
@@ -508,7 +611,9 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.2...v0.5.0

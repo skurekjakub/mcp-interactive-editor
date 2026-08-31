@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { pathInput } from "./limits.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, createProposal } from "../proposals.js";
 import { VIEW_URI, type ToolContext } from "./context.js";
-import { errorResult, openerResult, outcomeDescription } from "./results.js";
+import { errorResult, openerResult, outcomeDescription } from "./wording.js";
 import { waitForReview } from "./awaitReview.js";
 
 /**
@@ -24,7 +25,7 @@ export function registerProposeDelete(server: McpServer, context: ToolContext): 
         "and waits for an explicit confirmation. Never deletes anything itself. " +
         outcomeDescription(context),
       inputSchema: {
-        path: z.string().describe("File to delete."),
+        path: pathInput.describe("File to delete."),
         rationale: z.string().optional().describe("Why this file should go."),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },

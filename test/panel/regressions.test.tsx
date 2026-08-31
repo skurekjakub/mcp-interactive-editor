@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { App } from "../../ui/src/App.js";
 import { OpeningStatus } from "../../ui/src/components/OpeningStatus.js";
 import { ReviewPanes } from "../../ui/src/components/ReviewPanes.js";
@@ -19,18 +20,28 @@ import { previewState } from "../../ui/src/bridge.js";
 afterEach(cleanup);
 
 describe("the editor is never taken away", () => {
-  it("keeps a typeable editor in the diff-only view", () => {
-    // Arrange.
+  it("still takes typing in the diff-only view", async () => {
+    /*
+     * Typed rather than inspected. `Editor` is never handed a `disabled` prop,
+     * so reading that property back asserts a structural constant and passes
+     * against an editor nobody can type into — which is the defect itself:
+     * a change on screen that cannot be touched, the one thing the panel exists
+     * to allow. `readOnly` is no better, because `fireEvent` ignores it.
+     */
+    const user = userEvent.setup();
     render(<App />);
+    const editor = screen.getByLabelText("Proposed file contents") as HTMLTextAreaElement;
+    const before = editor.value;
 
-    // Act: "diff" once removed the editor outright, leaving a change on screen
-    // that could not be touched — the one thing the panel exists to allow.
-    fireEvent.click(screen.getByRole("button", { name: "diff" }));
+    // Act.
+    await user.click(screen.getByRole("button", { name: "diff" }));
+    await user.click(editor);
+    await user.keyboard("{End}# typed");
 
     // Assert.
-    const editor = screen.getByLabelText("Proposed file contents") as HTMLTextAreaElement;
-    expect(editor).toBeTruthy();
-    expect(editor.disabled).toBe(false);
+    const after = screen.getByLabelText("Proposed file contents") as HTMLTextAreaElement;
+    expect(after.value, "the keystrokes must reach the draft").not.toBe(before);
+    expect(after.value).toContain("# typed");
   });
 
   it("still shows the diff alongside it", () => {
@@ -152,7 +163,6 @@ describe("a highlight is always commentable", () => {
     // for that box to be filled.
     const row = document.querySelector(".selection-row");
     expect(row, "the pinned highlight should have its own row").toBeTruthy();
-    expect(row?.getAttribute("data-answered")).toBe("false");
     expect(screen.getByText(/needs a comment/i)).toBeTruthy();
 
     const send = screen.getByRole("button", { name: /send to claude/i }) as HTMLButtonElement;
@@ -171,7 +181,6 @@ describe("a highlight is always commentable", () => {
     const note = within(row).getByRole("textbox") as HTMLTextAreaElement;
     fireEvent.change(note, { target: { value: "why this line?" } });
 
-    expect(row.getAttribute("data-answered")).toBe("true");
     const send = screen.getByRole("button", { name: /send to claude/i }) as HTMLButtonElement;
     expect(send.disabled).toBe(false);
   });

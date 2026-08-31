@@ -153,7 +153,7 @@ compares them at runtime and says so on screen when they disagree — the two
 installs have separate update cycles and genuinely do drift.
 
 - Pure logic shared by both builds → `shared/` (`passages.ts`, `diff.ts`, `lint.ts`)
-- Pure logic for the server → `src/`, e.g. `src/tools/results.ts`
+- Pure logic for the server → `src/`, e.g. `src/tools/wording.ts`
 - Pure logic for the panel → `ui/src/lib/`, which is pure **by rule** — keep the
   DOM out of it, and do not import the bridge module from there
 - Anything touching a boundary is a thin wrapper around a pure unit. `DiffPane`
@@ -163,6 +163,41 @@ installs have separate update cycles and genuinely do drift.
 One module per tool under `src/tools/`. Adding a tool is a new file plus one line
 in `src/tools/index.ts` — which stays the only place that says which side of the
 model/app visibility line a tool falls on.
+
+## Say a thing once, in `shared/`
+
+Both halves render the same facts to two different readers, and the failure mode
+is silent: the panel showing one account while the server acts on another is
+invisible until the moment a commit is refused on a review that looked clean.
+
+- What a proposal looks like right now → `shared/state.ts` (`composeState`).
+  The server, the preview and the panel's live recompute all go through it.
+- Why a path was refused → `shared/rejection.ts`. The model reads
+  `explainRejection`; the panel reads the same text as a finding.
+- What a commit did → `shared/receipt.ts`. Both routes that tell the model
+  render from it.
+
+If you find yourself writing a second copy of one of these, that is the bug.
+
+## The gate is `npm run verify`
+
+Typecheck, ESLint, Prettier, the comment policy, knip, then the tests. All of it
+runs in CI; the type-aware and dead-code passes run on Linux only, because they
+read the same tsconfigs everywhere and cannot disagree between platforms.
+
+ESLint is type-aware, and that is the point rather than a style preference: the
+one rule that has already earned its keep is `no-unsafe-member-access`, which is
+what noticed that the commit gate's capability check had no type behind it at
+all. Two more it holds: `no-misused-promises` on the paths that write to disk,
+and `switch-exhaustiveness-check`, which catches a phase nobody handled.
+
+`knip` fails on an export nothing outside its module uses. That matters here more
+than usual — every exported symbol is one the comment policy has to document for
+a caller that does not exist.
+
+**Node 22 or newer.** `.nvmrc` and `engine-strict=true` in `.npmrc` enforce it;
+jsdom, undici and whatwg-url all require it, and an older Node runs the panel
+suite on an unsupported runtime that works right up until it does not.
 
 ## Which host gets you what
 

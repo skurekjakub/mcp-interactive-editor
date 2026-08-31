@@ -24,8 +24,6 @@ export interface Passage {
    */
   note?: string;
   /** Character range in the draft. Only meaningful when `source` is "editor". */
-  start?: number;
-  end?: number;
 }
 
 /** One rendered diff row, as the pane reports it. */
@@ -60,8 +58,6 @@ export function passageFromSelection(value: string, start: number, end: number):
   return {
     id: `editor:${start}-${end}`,
     source: "editor",
-    start,
-    end,
     text,
     startLine,
     endLine: startLine + measured.split("\n").length - 1,
@@ -117,18 +113,6 @@ export function rangeOf(passage: Passage): string {
   const from = Math.min(passage.startLine, passage.endLine);
   const to = Math.max(passage.startLine, passage.endLine);
   return from === to ? `line ${from}` : `lines ${from}–${to}`;
-}
-
-/**
- * Summarises a set of passages in a few words.
- *
- * @param passages - The passages to summarise.
- * @returns A range while there is one, a count once there are several.
- */
-export function describePassages(passages: Passage[]): string {
-  if (passages.length === 0) return "nothing";
-  if (passages.length === 1) return rangeOf(passages[0]);
-  return `${passages.length} passages`;
 }
 
 /**

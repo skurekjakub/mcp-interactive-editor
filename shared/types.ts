@@ -41,14 +41,13 @@ export interface TargetInfo {
     bytes: number;
     lines: number;
     sha256: string;
-    mtimeMs: number;
     /** POSIX mode, carried so a commit can restore it rather than reset it. */
     mode: number;
   };
 }
 
 /** How much a finding should interrupt the human. */
-export type FindingSeverity = "blocker" | "warning" | "info";
+type FindingSeverity = "blocker" | "warning" | "info";
 
 /** One thing worth saying about a proposal before it lands. */
 export interface Finding {
@@ -57,8 +56,6 @@ export interface Finding {
   severity: FindingSeverity;
   message: string;
   detail?: string;
-  /** Character range in the proposed content, when anchored to the body. */
-  range?: [number, number];
   /** A one-click rewrite of the whole content. */
   fix?: { label: string; content: string };
 }
@@ -92,10 +89,12 @@ export interface Proposal {
 }
 
 /** Everything the View needs for a first paint, returned as `structuredContent`. */
-export interface EditorState {
+export type EditorState = {
   proposal: Proposal;
   findings: Finding[];
   diff: DiffHunk[];
+  /** How much the proposal changes, measured on the same pass that built `diff`. */
+  stats: DiffStats;
   roots: string[];
   /** True when the server was started with --dry-run and will never touch disk. */
   dryRun: boolean;
@@ -107,7 +106,7 @@ export interface EditorState {
    * neither release, and nothing on screen says so.
    */
   serverVersion: string;
-}
+};
 
 /**
  * What an editor-opening tool returns instead of an `EditorState`.
@@ -118,16 +117,16 @@ export interface EditorState {
  * View redeems it for the full state through `editor_attach`, a call it already
  * makes on mount.
  */
-export interface ProposalHandle {
+export type ProposalHandle = {
   proposalId: string;
   /** Enough to name the file while the panel attaches. */
   display: string;
   mode: WriteMode;
-  /** Set when the path was refused, so the panel can say so before it attaches. */
+  /** Set when the path was refused, so the model can tell a refusal from an opened panel. */
   refused?: boolean;
   /** Which check refused the path, when it was refused. */
   rejection?: PathRejection;
-}
+};
 
 /**
  * How a review ended.
@@ -173,7 +172,8 @@ export interface DiffStats {
    * Set when only the trailing newline differs.
    *
    * Such a change alters the bytes on disk without altering any line, so the
-   * hunks are empty and the panel would otherwise report no changes at all.
+   * hunks are empty. Both readers are told about it as a finding instead, since
+   * an empty diff in front of a real write reads as nothing happening.
    */
   newlineAtEofChanged?: boolean;
 }
@@ -186,7 +186,7 @@ export interface DiffStats {
  * before the receipt travels back through a blocking opener, because the file
  * body has no business entering the model's context a second time.
  */
-export interface CommitReceipt {
+export type CommitReceipt = {
   ok: boolean;
   path: string;
   display: string;
@@ -198,4 +198,4 @@ export interface CommitReceipt {
   /** True when the human changed the model's proposal before committing. */
   editedByHuman: boolean;
   content?: string;
-}
+};

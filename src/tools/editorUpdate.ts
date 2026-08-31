@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { contentInput } from "./limits.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, updateProposal } from "../proposals.js";
 import type { ToolContext } from "./context.js";
-import { panelResult } from "./results.js";
+import { panelResult } from "./wording.js";
 
 /**
  * Registers the tool the panel calls as the human edits.
@@ -27,7 +28,7 @@ export function registerEditorUpdate(server: McpServer, { guard }: ToolContext):
       description: "Called by the panel as the human edits. Not for agent use.",
       inputSchema: {
         proposalId: z.string(),
-        content: z.string().optional(),
+        content: contentInput.optional(),
         destructiveAcknowledged: z.boolean().optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },

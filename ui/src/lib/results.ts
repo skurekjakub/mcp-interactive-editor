@@ -48,6 +48,23 @@ export function receiptIn(result: CallToolResult): CommitReceipt | null {
 }
 
 /**
+ * Reports whether the server already told the agent about this outcome.
+ *
+ * A blocking opening call returns the decision as its own result, so the panel
+ * saying it again is the agent hearing it twice. Only an explicit `true` counts:
+ * anything else — a server that does not set the field, a result with no
+ * structured half — means nobody has said it yet, and a message that never
+ * travels is the worse of the two failures.
+ *
+ * @param result - The result of a discard, commit or request-changes call.
+ * @returns True only when the server states it has already been delivered.
+ */
+export function deliveredIn(result: CallToolResult): boolean {
+  const candidate = result.structuredContent as { delivered?: unknown } | undefined;
+  return candidate?.delivered === true;
+}
+
+/**
  * Joins every text block of a result into one string.
  *
  * A tool that refuses comes back as `isError: true` with the reason in the text

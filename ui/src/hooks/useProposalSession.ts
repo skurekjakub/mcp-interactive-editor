@@ -67,6 +67,15 @@ export function useProposalSession(paused: boolean): ProposalSession {
   /** The path the opening tool was called with, from the arguments the host hands over. */
   const [openedPath, setOpenedPath] = useState<string | undefined>(undefined);
   const [phase, setPhase] = useState<ProposalSession["phase"]>("connecting");
+  /**
+   * Set once, by the host, when the call this panel belongs to is cancelled.
+   *
+   * Separate from `phase` because the claim and attach effects write `phase`
+   * themselves. Depending on a value the effect body sets makes the effect
+   * re-run and cancel its own in-flight call, so every mount asks twice — two
+   * re-reads of the file, and two attaches whose stored baselines can differ.
+   */
+  const [hostCancelled, setHostCancelled] = useState(false);
   const [displayMode, setDisplayMode] = useState<ProposalSession["displayMode"]>("inline");
   const [availableModes, setAvailableModes] = useState<string[]>([]);
 
@@ -121,6 +130,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
       // waiting on, and a commit through it would land with no conversation to
       // report back to.
       instance.addEventListener("toolcancelled", () => {
+        setHostCancelled(true);
         setPhase("cancelled");
         setFailure("The call this panel was opened for was cancelled. Nothing will be written.");
       });
@@ -173,7 +183,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
    * before the server has finished making the proposal.
    */
   useEffect(() => {
-    if (!bridge || !ready || state || phase === "cancelled") return;
+    if (!bridge || !ready || state || hostCancelled) return;
     let cancelled = false;
     setPhase("claiming");
     // A failure from an earlier attempt describes a state that has since passed;
@@ -223,13 +233,13 @@ export function useProposalSession(paused: boolean): ProposalSession {
     return () => {
       cancelled = true;
     };
-  }, [bridge, ready, state, openedPath, adopt, phase]);
+  }, [bridge, ready, state, openedPath, adopt, hostCancelled]);
 
   // Attaching is what unlocks the commit tool server-side. Until it lands
   // nothing can write, including from a host that ignores tool visibility. It is
   // also how the panel gets the file the opening result left out.
   useEffect(() => {
-    if (!bridge || !ready || !proposalId || phase === "cancelled") return;
+    if (!bridge || !ready || !proposalId || hostCancelled) return;
     let cancelled = false;
     setPhase("attaching");
     setFailure(null);
@@ -265,7 +275,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
     return () => {
       cancelled = true;
     };
-  }, [bridge, ready, proposalId, adopt, phase]);
+  }, [bridge, ready, proposalId, adopt, hostCancelled]);
 
   // Keep the server's copy current, but not on every character.
   const pushTimer = useRef<number | undefined>(undefined);

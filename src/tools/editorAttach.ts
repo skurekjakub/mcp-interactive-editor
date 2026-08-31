@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, getProposal, restatTarget, updateProposal } from "../proposals.js";
 import type { ToolContext } from "./context.js";
-import { panelResult } from "./results.js";
+import { panelResult } from "./wording.js";
 
 /**
  * Registers the tool the panel calls when it mounts.

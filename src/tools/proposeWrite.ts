@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { pathInput, contentInput } from "./limits.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, createProposal } from "../proposals.js";
 import { VIEW_URI, type ToolContext } from "./context.js";
-import { openerResult, outcomeDescription } from "./results.js";
+import { openerResult, outcomeDescription } from "./wording.js";
 import { waitForReview } from "./awaitReview.js";
 
 /**
@@ -26,10 +27,10 @@ export function registerProposeWrite(server: McpServer, context: ToolContext): v
         "never writes anything itself. " +
         outcomeDescription(context),
       inputSchema: {
-        path: z
-          .string()
-          .describe("File to write. Absolute, or relative to the first configured root."),
-        content: z.string().describe("The full new contents of the file."),
+        path: pathInput.describe(
+          "File to write. Absolute, or relative to the first configured root.",
+        ),
+        content: contentInput.describe("The full new contents of the file."),
         rationale: z
           .string()
           .optional()

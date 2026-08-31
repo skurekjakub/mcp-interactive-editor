@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, parse, resolve } from "node:path";
 import { DEFAULT_DENY, FsGuard, sha256 } from "../../src/fsGuard.js";
 
 let root: string;
@@ -84,11 +84,11 @@ describe("resolving paths", () => {
 
   it("distinguishes a denied path from one outside the roots", async () => {
     const denied = await guard.describe(join(root, ".env"));
-    const outside = await guard.describe(join(root, "..", "elsewhere.txt"));
+    const beyond = await guard.describe(join(root, "..", "elsewhere.txt"));
 
     expect(denied.rejection).toBe("denied");
     expect(denied.deniedBy).toBe(".env");
-    expect(outside.rejection).toBe("outside-roots");
+    expect(beyond.rejection).toBe("outside-roots");
   });
 
   it("anchors deny patterns so ordinary files are not caught by substring", async () => {
@@ -178,7 +178,7 @@ describe("symlinks", () => {
 });
 
 describe("writing", () => {
-  it("creates missing parent directories and writes atomically", async () => {
+  it("creates missing parent directories on the way", async () => {
     const target = await guard.describe(join(root, "a", "b", "c.txt"));
     const result = await guard.commit(target.absolute!, "written\n");
 
@@ -186,13 +186,21 @@ describe("writing", () => {
     expect(await readFile(join(root, "a", "b", "c.txt"), "utf8")).toBe("written\n");
   });
 
-  it("leaves no temp files behind", async () => {
-    const { readdir } = await import("node:fs/promises");
+  it("puts the new file in place in one step and nothing else", async () => {
+    // Arrange: a reader opening the path mid-write must see either the old file
+    // or the new one, which is what renaming within a directory buys. Whatever
+    // gets renamed must not survive under any name — so this compares the
+    // directory before and after, rather than looking for one known suffix
+    // copied out of the implementation.
     const target = await guard.describe(join(root, "tidy.txt"));
+    const before = new Set(await readdir(root));
+
+    // Act.
     await guard.commit(target.absolute!, "tidy\n");
 
-    const entries = await readdir(root);
-    expect(entries.filter((e) => e.includes("interactive-editor.tmp"))).toHaveLength(0);
+    // Assert.
+    const added = (await readdir(root)).filter((entry) => !before.has(entry));
+    expect(added).toEqual(["tidy.txt"]);
   });
 
   it("reads a missing file as empty rather than throwing", async () => {
@@ -225,5 +233,41 @@ describe("dry run", () => {
 
     await dry.remove(path);
     expect(await readFile(path, "utf8")).toBe("still here\n");
+  });
+});
+
+describe("resolving a path whose missing tail reaches the filesystem root", () => {
+  /**
+   * A guard rooted at the filesystem root itself.
+   *
+   * That is the only place the walk up from a missing segment lands on a parent
+   * which already ends in its own separator, so it is the only place the segment
+   * arithmetic can drop a character.
+   */
+  const atFilesystemRoot = () =>
+    new FsGuard({ roots: [parse(root).root], deny: [], dryRun: false });
+
+  it("keeps every character of a missing first-level directory", async () => {
+    // Arrange: nothing named this exists, so the walk goes all the way up.
+    const wanted = join(parse(root).root, "zzz-does-not-exist", "a.txt");
+
+    // Act.
+    const target = await atFilesystemRoot().describe(wanted);
+
+    // Assert: losing a character here writes to a path nobody asked for, and
+    // with the right root that path is still inside it, so nothing refuses it.
+    expect(target.absolute).toBe(wanted);
+  });
+
+  it("keeps every character of a missing file directly under the root", async () => {
+    const wanted = join(parse(root).root, "qqq-missing-file.txt");
+
+    expect((await atFilesystemRoot().describe(wanted)).absolute).toBe(wanted);
+  });
+
+  it("is unaffected when the walk stops at a directory that exists", async () => {
+    const wanted = join(root, "nope-nothing-here", "a.txt");
+
+    expect((await guard.describe(wanted)).absolute).toBe(wanted);
   });
 });

@@ -9,6 +9,7 @@
  */
 import type { DiffStats, Finding, Proposal } from "./types.js";
 import { splitLines } from "./diff.js";
+import { rejectionDetail } from "./rejection.js";
 
 /** Removing more than this share of an existing file needs an explicit tick. */
 export const DESTRUCTIVE_DELETION_RATIO = 0.5;
@@ -19,12 +20,12 @@ export const DESTRUCTIVE_DELETION_RATIO = 0.5;
  * person would recognise, and a checkbox in front of it trains the reflex to
  * tick without reading — the reflex the whole panel exists to prevent.
  */
-export const DESTRUCTIVE_MIN_LINES = 10;
+const DESTRUCTIVE_MIN_LINES = 10;
 
 /** How many lines have to go before the share is worth interrupting for. */
-export const DESTRUCTIVE_MIN_REMOVED = 5;
+const DESTRUCTIVE_MIN_REMOVED = 5;
 /** Above this, the editor stops being pleasant and the diff stops being readable. */
-export const LARGE_FILE_LINES = 5000;
+const LARGE_FILE_LINES = 5000;
 
 const NUL = String.fromCharCode(0);
 
@@ -33,12 +34,14 @@ const NUL = String.fromCharCode(0);
  *
  * @param proposal - The proposal to check.
  * @param stats - How much it adds and removes.
+ * @param roots - The configured writable roots, named when a path falls outside them.
  * @returns The findings, most severe first.
  */
-export function lintProposal(proposal: Proposal, stats: DiffStats): Finding[] {
+export function lintProposal(proposal: Proposal, stats: DiffStats, roots: string[]): Finding[] {
   const findings: Finding[] = [
-    ...lintTarget(proposal),
+    ...lintTarget(proposal, roots),
     ...lintDestructiveness(proposal, stats),
+    ...lintDiff(stats),
     ...lintContentHygiene(proposal),
   ];
   return findings.sort((a, b) => weight(b.severity) - weight(a.severity));
@@ -58,9 +61,10 @@ function weight(severity: Finding["severity"]): number {
  * Checks the path a proposal names.
  *
  * @param proposal - The proposal to check.
+ * @param roots - The configured writable roots, named when a path falls outside them.
  * @returns Findings about the target itself.
  */
-function lintTarget(proposal: Proposal): Finding[] {
+function lintTarget(proposal: Proposal, roots: string[]): Finding[] {
   const { target } = proposal;
 
   if (!target.absolute) {
@@ -70,7 +74,7 @@ function lintTarget(proposal: Proposal): Finding[] {
         rule: "path",
         severity: "blocker",
         message: `"${target.requested}" is not a path this server will write to.`,
-        detail: "It resolves outside every configured root, or it could not be resolved at all.",
+        detail: rejectionDetail(target, roots),
       },
     ];
   }
@@ -165,6 +169,18 @@ function lintDestructiveness(proposal: Proposal, stats: DiffStats): Finding[] {
     });
   }
 
+  return findings;
+}
+
+/**
+ * Checks whether the diff below can be trusted as a comparison.
+ *
+ * @param stats - How much the proposal adds and removes.
+ * @returns Findings about the diff itself.
+ */
+function lintDiff(stats: DiffStats): Finding[] {
+  const findings: Finding[] = [];
+
   if (stats.truncated) {
     findings.push({
       id: "diff-truncated",
@@ -173,6 +189,17 @@ function lintDestructiveness(proposal: Proposal, stats: DiffStats): Finding[] {
       message: "Both versions are too large to diff line by line.",
       detail:
         "The diff below shows a wholesale replacement, not a real comparison. Read the content itself.",
+    });
+  }
+
+  if (stats.newlineAtEofChanged) {
+    findings.push({
+      id: "newline-at-eof",
+      rule: "diff",
+      severity: "info",
+      message: "Only the newline at the end of the file changes.",
+      detail:
+        "No line differs, so the diff below has nothing to show — but the bytes on disk do change.",
     });
   }
 
@@ -221,15 +248,33 @@ function lintContentHygiene(proposal: Proposal): Finding[] {
       message: "CRLF endings, but the file on disk uses LF.",
       fix: { label: "Match the file", content: content.replace(/\r\n/g, "\n") },
     });
+  } else if (!hasCrlf && hasBareLf && baseline.includes("\r\n") && !/(?<!\r)\n/.test(baseline)) {
+    /*
+     * The diff cannot show this one. Lines are compared with their terminators
+     * stripped, so a file whose every line ending changes reads as no change at
+     * all — an empty diff, no findings, and a live Save button that rewrites
+     * every line in the file. Saying it here is the only thing standing between
+     * that write and a human who was shown nothing.
+     */
+    findings.push({
+      id: "eol-rewrite",
+      rule: "hygiene",
+      severity: "warning",
+      message: "LF endings, but the file on disk uses CRLF.",
+      detail:
+        "Every line ending in the file would be rewritten. The diff compares lines without their terminators, so it cannot show this.",
+      fix: { label: "Keep CRLF", content: content.replace(/\n/g, "\r\n") },
+    });
   }
 
-  if (/[ \t]+$/m.test(content)) {
+  const stripped = stripTrailingWhitespace(content);
+  if (stripped !== content) {
     findings.push({
       id: "trailing-whitespace",
       rule: "hygiene",
       severity: "info",
       message: "Trailing whitespace on one or more lines.",
-      fix: { label: "Strip it", content: content.replace(/[ \t]+$/gm, "") },
+      fix: { label: "Strip it", content: stripped },
     });
   }
 
@@ -265,6 +310,40 @@ function lintContentHygiene(proposal: Proposal): Finding[] {
   }
 
   return findings;
+}
+
+/**
+ * Removes spaces and tabs from the end of every line.
+ *
+ * Scanned rather than matched with `/[ \t]+$/gm`. That pattern is quadratic on a
+ * long run of spaces the line does not end with: the engine consumes the run,
+ * fails the anchor, and gives one character back per attempt, from every offset.
+ * Content is caller-supplied and this runs on every keystroke in the panel and
+ * again on the server before a commit, so 40 KB of spaces on one line is enough
+ * to stop both for minutes.
+ *
+ * @param text - The content to clean.
+ * @returns The content with line terminators and their style untouched.
+ */
+function stripTrailingWhitespace(text: string): string {
+  // The capture keeps the terminators in the array, at every odd index, so CRLF
+  // and the final newline survive the rejoin exactly as they arrived.
+  return text
+    .split(/(\r?\n)/)
+    .map((part, index) => (index % 2 === 0 ? trimLineEnd(part) : part))
+    .join("");
+}
+
+/**
+ * Removes spaces and tabs from the end of one line.
+ *
+ * @param line - The line, without its terminator.
+ * @returns The line, trimmed on the right.
+ */
+function trimLineEnd(line: string): string {
+  let end = line.length;
+  while (end > 0 && (line[end - 1] === " " || line[end - 1] === "\t")) end -= 1;
+  return end === line.length ? line : line.slice(0, end);
 }
 
 /**

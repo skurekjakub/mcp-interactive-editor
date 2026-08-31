@@ -111,10 +111,11 @@ describe("committing", () => {
     // Act.
     await act(() => result.current.commit());
 
-    // Assert.
-    const reported = onFailure.mock.calls.map(([m]) => m).filter(Boolean);
-    expect(reported).toHaveLength(1);
-    expect(reported[0]).toBeTruthy();
+    // Assert: the reason has to be renderable, not merely non-null. Filtering
+    // the falsy values out first and then asserting the survivors are truthy
+    // cannot fail, and a whitespace-only reason still puts nothing on screen.
+    const reported = onFailure.mock.calls.at(-1)?.[0] as string | null;
+    expect(reported?.trim(), "a blank reason renders as no failure at all").toBeTruthy();
   });
 
   it("surfaces a commit that came back without a receipt", async () => {
@@ -143,7 +144,7 @@ describe("committing", () => {
       async callTool(name) {
         order.push(name);
         return name === "editor_commit"
-          ? { content: [], structuredContent: receipt as unknown as Record<string, unknown> }
+          ? { content: [], structuredContent: receipt }
           : { content: [], structuredContent: {} };
       },
       async updateModelContext() {

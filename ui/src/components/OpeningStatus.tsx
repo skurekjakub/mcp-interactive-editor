@@ -10,10 +10,12 @@ interface OpeningStatusProps {
 /**
  * Renders what the panel shows before it has a proposal.
  *
- * This was three lines inline in `App`, and one of them was a bug: it rendered
- * "Opening …" and never read `failure`, so a claim that failed looked exactly
- * like one that was slow — a spinner forever, with the reason sitting in state
- * nothing displayed. Naming the step turns a stall into a bug report.
+ * Names the step it is waiting on and shows any failure alongside it. Both are
+ * load-bearing: a screen that only says "Opening…" makes a claim that failed
+ * look exactly like one that is slow, and the reason sits in state nobody reads.
+ *
+ * @param props - The file being opened, how far the session has got, and any failure.
+ * @returns The status screen.
  */
 export function OpeningStatus({ display, phase, failure }: OpeningStatusProps) {
   return (
@@ -32,12 +34,19 @@ export function OpeningStatus({ display, phase, failure }: OpeningStatusProps) {
  * @returns A phrase for the reader.
  */
 function describePhase(phase: ProposalSession["phase"]): string {
+  // Every case named rather than defaulted. A default here answered "cancelled"
+  // with "attaching to the proposal", so a panel whose call had been abandoned
+  // reported itself as busy making progress.
   switch (phase) {
     case "connecting":
       return "waiting for the host";
     case "claiming":
       return "asking the server which proposal this panel is for";
-    default:
+    case "attaching":
       return "attaching to the proposal";
+    case "ready":
+      return "ready";
+    case "cancelled":
+      return "the call this panel belongs to was cancelled";
   }
 }

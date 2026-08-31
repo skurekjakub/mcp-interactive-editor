@@ -38,16 +38,15 @@ export interface ToolContext {
   /**
    * Whether an opening call waits for the human at all.
    *
-   * Off by default, and that default is the result of a real failure. Holding
-   * the call open requires the host to keep dispatching tool calls while one is
-   * still outstanding — the panel has to claim its proposal and attach *during*
-   * the call that created it. The MCP server does exactly that (a plain client
-   * gets an answer in 4ms while an opener is open), but a host is free to
-   * serialise, and at least one does: the panel's calls never arrive, it sits on
-   * "Opening…", and the editor is unusable.
+   * Holding the call open requires the host to keep dispatching tool calls while
+   * one is still outstanding, because the panel claims its proposal and attaches
+   * *during* the call that created it. MCP Apps § Message Dispatch leaves that
+   * optional, so a host is free to serialise instead — and where it does, the
+   * panel's calls never arrive and it sits on "Opening…" forever.
    *
-   * A non-blocking editor is a smaller thing than a blocking one, and it works
-   * everywhere. Turn it on with --block-on-review where the host allows it.
+   * Off by default for that reason: a non-blocking editor is a smaller thing
+   * than a blocking one, and it works everywhere. Turn it on with
+   * --block-on-review where the host allows it.
    */
   blockOnReview: boolean;
 }

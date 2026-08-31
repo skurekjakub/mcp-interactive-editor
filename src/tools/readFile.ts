@@ -1,9 +1,10 @@
-import { z } from "zod";
+import { pathInput } from "./limits.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { countLines } from "../../shared/diff.js";
 import type { ToolContext } from "./context.js";
-import { errorResult, explainRejection } from "./results.js";
+import { explainRejection } from "../../shared/rejection.js";
+import { errorResult } from "./wording.js";
 
 /**
  * How much of a file to return to the model, in characters.
@@ -29,7 +30,7 @@ export function registerReadFile(server: McpServer, { guard }: ToolContext): voi
         "Reads a file the editor is allowed to write, so a proposal can be based on what is " +
         "actually there. Refuses anything outside the configured roots, and truncates very " +
         "large files.",
-      inputSchema: { path: z.string() },
+      inputSchema: { path: pathInput },
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["model", "app"] } },
     },

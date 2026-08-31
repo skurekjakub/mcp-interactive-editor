@@ -50,7 +50,7 @@ export const ANCHOR_GAP = 8;
  * @param gap - Margin to keep at each edge.
  * @returns A width that fits.
  */
-export function fitWidth(preferred: number, viewport: Viewport, gap: number = ANCHOR_GAP): number {
+function fitWidth(preferred: number, viewport: Viewport, gap: number = ANCHOR_GAP): number {
   return Math.max(120, Math.min(preferred, viewport.width - gap * 2));
 }
 

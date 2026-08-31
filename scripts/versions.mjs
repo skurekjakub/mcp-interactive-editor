@@ -31,6 +31,18 @@ export function read(rel) {
 }
 
 /**
+ * The JSON manifests carrying a version. `.claude-plugin/plugin.json` is the
+ * cache key, so a declaration missing from this list goes stale silently.
+ */
+export const MANIFESTS = ["package.json", "package-lock.json", ".claude-plugin/plugin.json"];
+
+/** The two halves' own version modules. */
+export const VERSION_MODULES = ["src/version.ts", "ui/src/lib/version.ts"];
+
+/** The literal a version module declares, with the number as its middle group. */
+export const VERSION_LITERAL = /(_VERSION = ")(\d+\.\d+\.\d+)(")/;
+
+/**
  * Collects every declared version.
  *
  * @returns One entry per declaration, as `{where, version}`.
@@ -38,7 +50,7 @@ export function read(rel) {
 export function declaredVersions() {
   const found = [];
 
-  for (const rel of ["package.json", "package-lock.json", ".claude-plugin/plugin.json"]) {
+  for (const rel of MANIFESTS) {
     found.push({ where: rel, version: JSON.parse(read(rel)).version });
   }
 
@@ -51,8 +63,8 @@ export function declaredVersions() {
     found.push({ where: `marketplace plugin ${plugin.name}`, version: plugin.version });
   }
 
-  for (const rel of ["src/version.ts", "ui/src/lib/version.ts"]) {
-    found.push({ where: rel, version: read(rel).match(/_VERSION = "(\d+\.\d+\.\d+)"/)?.[1] });
+  for (const rel of VERSION_MODULES) {
+    found.push({ where: rel, version: read(rel).match(VERSION_LITERAL)?.[2] });
   }
 
   return found;

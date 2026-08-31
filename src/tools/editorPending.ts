@@ -4,7 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, findOpenProposal, openProposals } from "../proposals.js";
 import type { ToolContext } from "./context.js";
-import { panelResult } from "./results.js";
+import { panelResult } from "./wording.js";
 
 /**
  * Registers the tool a panel uses to claim the proposal it was opened for.
@@ -26,6 +26,7 @@ export function registerEditorPending(server: McpServer, { guard }: ToolContext)
           .optional()
           .describe("Narrow to one file, from the arguments the panel was handed."),
       },
+      annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } },
     },
     async ({ path }) => {

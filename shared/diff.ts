@@ -14,8 +14,15 @@
  */
 import type { DiffHunk, DiffLine, DiffStats } from "./types.js";
 
-/** Largest LCS table the panel will build, in lines per side. */
-const LCS_LINE_BUDGET = 1500;
+/**
+ * Largest LCS table the panel will build, in cells.
+ *
+ * The table is `(n+1)*(m+1)` `Uint32` cells, so the product is what costs memory
+ * and time. Bounding the product rather than each side keeps a lopsided diff
+ * cheap: a short file against an enormous one is under any per-side limit and
+ * still allocates gigabytes.
+ */
+const LCS_CELL_BUDGET = 1500 * 1500;
 
 /** How many unchanged lines to keep either side of a change. */
 const CONTEXT_LINES = 3;
@@ -85,7 +92,11 @@ export function diffLines(before: string, after: string): { hunks: DiffHunk[]; s
   const midA = a.slice(prefix, a.length - suffix);
   const midB = b.slice(prefix, b.length - suffix);
 
-  const truncated = midA.length > LCS_LINE_BUDGET && midB.length > LCS_LINE_BUDGET;
+  // The table is what has to be afforded, not either side of it. Requiring both
+  // sides to be over budget leaves the product unbounded: 1500 lines against
+  // 1.5 million is under the per-side limit on one side and nine gigabytes of
+  // Uint32 on the machine.
+  const truncated = midA.length * midB.length > LCS_CELL_BUDGET;
   const middle: DiffLine[] = truncated
     ? wholesaleReplace(midA, midB, prefix)
     : lcsDiff(midA, midB, prefix);

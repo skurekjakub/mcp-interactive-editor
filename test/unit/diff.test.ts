@@ -128,3 +128,41 @@ describe("formatUnifiedDiff", () => {
     expect(text).toMatch(/@@ -\d+,\d+ \+\d+,\d+ @@/);
   });
 });
+
+describe("the cost of diffing lopsided files", () => {
+  it("falls back to a wholesale replacement when the table would be enormous", () => {
+    // Arrange: one side well under the per-side limit, the other far over it.
+    // A guard that needs *both* sides over budget lets this through and
+    // allocates a table of (1500 * 200000) Uint32 cells.
+    const small = Array.from({ length: 1_400 }, (_, i) => `a${i}`).join("\n");
+    const huge = Array.from({ length: 200_000 }, (_, i) => `b${i}`).join("\n");
+
+    // Act.
+    const started = Date.now();
+    const { stats } = diffLines(small, huge);
+    const elapsed = Date.now() - started;
+
+    // Assert.
+    expect(stats.truncated).toBe(true);
+    expect(elapsed).toBeLessThan(5_000);
+  });
+
+  it("still diffs a small change in a large file line by line", () => {
+    const before = Array.from({ length: 3_000 }, (_, i) => `line ${i}`).join("\n");
+    const after = before.replace("line 1500", "changed");
+
+    const { stats } = diffLines(before, after);
+
+    // The common prefix and suffix collapse first, so the table stays tiny.
+    expect(stats.truncated).toBeUndefined();
+    expect(stats).toMatchObject({ added: 1, removed: 1 });
+  });
+
+  it("diffs one line against a few thousand without truncating", () => {
+    const after = Array.from({ length: 3_000 }, (_, i) => `new ${i}`).join("\n");
+
+    const { stats } = diffLines("only\n", after);
+
+    expect(stats.truncated).toBeUndefined();
+  });
+});

@@ -2,7 +2,8 @@ import { useCallback, useState } from "react";
 import type { CommitReceipt, EditorState } from "../../../shared/types.js";
 import type { Bridge } from "../bridge.js";
 import { call } from "../lib/call.js";
-import { messageOf, receiptIn, textOf } from "../lib/results.js";
+import { describeCommitWithContent } from "../../../shared/receipt.js";
+import { deliveredIn, messageOf, receiptIn, textOf } from "../lib/results.js";
 
 /** Everything the commit flow needs to walk a proposal to disk. */
 interface CommitFlowInput {
@@ -92,17 +93,7 @@ export function useCommitFlow({
        * what it proposed.
        */
       await bridge.updateModelContext({
-        content: [
-          {
-            type: "text",
-            text:
-              `${receipt.mode === "delete" ? "Deleted" : "Wrote"} ${receipt.display}` +
-              `${receipt.dryRun ? " (dry run, nothing reached disk)" : ""}. ` +
-              (receipt.editedByHuman
-                ? `The human edited the proposal before approving it. What actually landed:\n\n${receipt.content}`
-                : "Committed as proposed."),
-          },
-        ],
+        content: [{ type: "text", text: describeCommitWithContent(receipt) }],
         structuredContent: {
           path: receipt.display,
           sha256: receipt.sha256,
@@ -136,9 +127,7 @@ export function useCommitFlow({
        * discarded and the agent already knows. Only when nothing was waiting do
        * the words still have to travel.
        */
-      const delivered = (dropped.result.structuredContent as { delivered?: boolean } | undefined)
-        ?.delivered;
-      if (delivered !== true) {
+      if (!deliveredIn(dropped.result)) {
         await bridge.sendMessage(
           `I discarded the proposed write to ${state.proposal.target.display}. Nothing was written.`,
         );

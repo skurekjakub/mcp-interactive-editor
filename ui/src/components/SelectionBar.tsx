@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { basename } from "../lib/labels.js";
 import {
   isAnswered,
   rangeOf,
@@ -227,14 +228,4 @@ function excerpt(text: string): string {
   const firstLine = text.split("\n")[0]?.trim() ?? "";
   const trimmed = firstLine.length > 96 ? `${firstLine.slice(0, 96)}…` : firstLine;
   return text.includes("\n") ? `${trimmed} …` : trimmed;
-}
-
-/**
- * Takes the file name from a path.
- *
- * @param path - A display path.
- * @returns Its last segment.
- */
-function basename(path: string): string {
-  return path.split("/").pop() ?? path;
 }

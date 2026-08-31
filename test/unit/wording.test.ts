@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { EditorState, Finding, PathRejection, Proposal } from "../../shared/types.js";
-import { diffLines } from "../../shared/diff.js";
+import { composeState } from "../../shared/state.js";
 import {
+  MODEL_DIFF_CHAR_BUDGET,
   MODEL_DIFF_LINE_BUDGET,
   describeState,
   diffForModel,
   handleFor,
-} from "../../src/tools/results.js";
+} from "../../src/tools/wording.js";
 
 function stateFor(
   baseline: string,
@@ -39,14 +40,14 @@ function stateFor(
     createdAt: 0,
   };
 
-  return {
-    proposal,
-    findings: over.findings ?? [],
-    diff: diffLines(baseline, content).hunks,
+  // Composed the way the server composes it, then the findings are pinned so a
+  // case can say exactly which ones it is about.
+  const state = composeState(proposal, {
     roots: ["/root"],
     dryRun: over.dryRun ?? false,
     serverVersion: "test",
-  };
+  });
+  return { ...state, findings: over.findings ?? [] };
 }
 
 describe("handleFor", () => {
@@ -129,5 +130,36 @@ describe("describeState", () => {
   it("says a directory is a directory", () => {
     const text = describeState(stateFor("", "x", { absolute: null, rejection: "not-a-file" }));
     expect(text).toMatch(/is a directory/);
+  });
+});
+
+describe("how much diff the model is given", () => {
+  it("caps a diff whose lines are enormous, not just one with many lines", () => {
+    // Arrange: a single line big enough to be the whole context window. A line
+    // budget counts this as one line and hands all of it over, which is the
+    // cost the claim ticket exists to avoid.
+    const huge = `${"x".repeat(2_000_000)}\n`;
+
+    // Act.
+    const rendered = diffForModel(stateFor("before\n", huge));
+
+    // Assert.
+    expect(rendered.length).toBeLessThan(MODEL_DIFF_CHAR_BUDGET * 2);
+    expect(rendered).toMatch(/truncated|more diff lines/);
+  });
+
+  it("still caps a diff with many ordinary lines", () => {
+    const many = `${Array.from({ length: 400 }, (_, i) => `line ${i}`).join("\n")}\n`;
+
+    const rendered = diffForModel(stateFor("", many));
+
+    expect(rendered.split("\n").length).toBeLessThanOrEqual(MODEL_DIFF_LINE_BUDGET + 1);
+    expect(rendered).toMatch(/more diff lines/);
+  });
+
+  it("hands over a small diff whole, with no note", () => {
+    const rendered = diffForModel(stateFor("a\n", "b\n"));
+
+    expect(rendered).not.toMatch(/more diff lines|truncated/);
   });
 });

@@ -8,3 +8,4 @@ coverage/
 
 # bundle/ is a distribution artifact and IS committed — the Claude Code plugin
 # installs by git clone with no build step, so it has to be in the tree.
+.eslintcache

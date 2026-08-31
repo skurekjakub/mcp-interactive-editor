@@ -3,7 +3,7 @@ import type { ReviewOutcome } from "../../shared/types.js";
 import { getProposal } from "../proposals.js";
 import { awaitReview, isAwaitingReview, resolveReview } from "../review.js";
 import type { ToolContext } from "./context.js";
-import { describeReceipt } from "./results.js";
+import { describeCommit } from "../../shared/receipt.js";
 
 /** How often to check whether a panel has attached, in milliseconds. */
 const ATTACH_POLL_MS = 25;
@@ -85,7 +85,7 @@ async function attachedWithin(proposalId: string, graceMs: number): Promise<bool
  * @param opened - The opening result, returned when nobody answered.
  * @returns What the agent is told.
  */
-export function describeOutcome(outcome: ReviewOutcome, opened: CallToolResult): CallToolResult {
+function describeOutcome(outcome: ReviewOutcome, opened: CallToolResult): CallToolResult {
   switch (outcome.kind) {
     case "committed": {
       // The body has already been through the panel. Sending it back through the
@@ -93,8 +93,8 @@ export function describeOutcome(outcome: ReviewOutcome, opened: CallToolResult):
       // cost the claim-ticket handle exists to avoid.
       const { content: _body, ...receipt } = outcome.receipt;
       return {
-        content: [{ type: "text", text: describeReceipt(outcome.receipt) }],
-        structuredContent: receipt as unknown as Record<string, unknown>,
+        content: [{ type: "text", text: describeCommit(outcome.receipt) }],
+        structuredContent: receipt,
       };
     }
 

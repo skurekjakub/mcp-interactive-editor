@@ -8,7 +8,7 @@ import {
 } from "../../../shared/passages.js";
 import type { Bridge } from "../bridge.js";
 import { call } from "../lib/call.js";
-import { messageOf } from "../lib/results.js";
+import { deliveredIn, messageOf } from "../lib/results.js";
 
 /** The tray of highlighted regions and their journey back to the agent. */
 export interface PassageTray {
@@ -110,9 +110,7 @@ export function usePassages(
          * still have to travel, so they go as a message instead. Either way the
          * words arrive; only the route differs.
          */
-        const delivered = (sent.result.structuredContent as { delivered?: boolean } | undefined)
-          ?.delivered;
-        if (delivered !== true) {
+        if (!deliveredIn(sent.result)) {
           await bridge.sendMessage(quotePassages(display, outgoing, note));
         }
 
