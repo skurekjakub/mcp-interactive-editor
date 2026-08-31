@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { CommitReceipt, Finding, Proposal } from "../../shared/types.js";
 import { diffLines } from "../../shared/diff.js";
 import { hasBlockers, lintProposal } from "../../shared/lint.js";
+import { isAnswered, type Passage } from "../../shared/passages.js";
 import { IS_PREVIEW } from "./bridge.js";
 import { useCommitFlow } from "./hooks/useCommitFlow.js";
 import { usePassages } from "./hooks/usePassages.js";
@@ -10,6 +11,9 @@ import { commitLabel } from "./lib/labels.js";
 import { Findings } from "./components/Findings.js";
 import { ProposalTag } from "./components/ProposalTag.js";
 import { Receipt } from "./components/Receipt.js";
+import { SentBack } from "./components/SentBack.js";
+import { CommentPopover } from "./components/CommentPopover.js";
+import type { SelectionAnchor } from "./lib/anchor.js";
 import { ReviewPanes } from "./components/ReviewPanes.js";
 import { SelectionBar } from "./components/SelectionBar.js";
 import { Threshold } from "./components/Threshold.js";
@@ -26,12 +30,19 @@ import type { View } from "./components/ViewToggle.js";
 export function App() {
   const [view, setView] = useState<View>("split");
   const [receipt, setReceipt] = useState<CommitReceipt | null>(null);
+  /** Where the live selection sits on screen, so the comment box opens beside it. */
+  const [anchor, setAnchor] = useState<SelectionAnchor | null>(null);
 
   // A committed proposal stops syncing: there is nothing left to sync it to.
   const session = useProposalSession(receipt !== null);
   const { state, handle, bridge, content, setContent, ack, setAck, setFailure } = session;
 
-  const tray = usePassages(bridge, state?.proposal.target.display, setFailure);
+  const tray = usePassages(
+    bridge,
+    state?.proposal.proposalId,
+    state?.proposal.target.display,
+    setFailure,
+  );
 
   const { busy, commit, discard } = useCommitFlow({
     bridge,
@@ -41,6 +52,22 @@ export function App() {
     onCommitted: setReceipt,
     onFailure: setFailure,
   });
+
+  const onSelect = useCallback(
+    (passage: Passage | null, at: SelectionAnchor | null) => {
+      tray.select(passage);
+      setAnchor(at);
+    },
+    [tray.select],
+  );
+
+  const onAddComment = useCallback(
+    (passage: Passage, note: string) => {
+      tray.pin(note ? { ...passage, note } : passage);
+      setAnchor(null);
+    },
+    [tray.pin],
+  );
 
   const applyFix = useCallback(
     (finding: Finding) => {
@@ -76,6 +103,8 @@ export function App() {
     return <div className="status">Opening {handle?.display ?? "the editor"}…</div>;
   }
   if (receipt) return <Receipt receipt={receipt} />;
+  // The opening call has returned with the comments; there is nothing left here.
+  if (tray.rejected) return <SentBack path={state.proposal.target.display} />;
 
   const { proposal, findings, hunks, stats } = local;
   const isDelete = proposal.mode === "delete";
@@ -94,26 +123,34 @@ export function App() {
         onViewChange={setView}
         content={content}
         onContentChange={setContent}
-        onSelect={tray.select}
+        onSelect={onSelect}
         hunks={hunks}
         target={proposal.target}
         isDelete={isDelete}
       />
 
-      {tray.active ? (
+      {tray.pending && anchor ? (
+        <CommentPopover
+          passage={tray.pending}
+          anchor={anchor}
+          onAdd={onAddComment}
+          onDismiss={() => {
+            tray.select(null);
+            setAnchor(null);
+          }}
+        />
+      ) : null}
+
+      {tray.passages.length > 0 ? (
         <SelectionBar
-          pending={tray.pending}
           passages={tray.passages}
           path={proposal.target.display}
           sending={tray.sending}
-          onAttach={tray.pin}
           onAnnotate={tray.annotate}
           onRemove={tray.unpin}
           onSend={tray.send}
           onDismiss={tray.clear}
         />
-      ) : tray.sent ? (
-        <div className="sent-note">{tray.sent}</div>
       ) : null}
 
       <Threshold
@@ -122,6 +159,7 @@ export function App() {
         onAck={setAck}
         isDelete={isDelete}
         blocked={hasBlockers(findings)}
+        hasComments={tray.passages.some(isAnswered)}
         busy={busy}
         writable={proposal.target.absolute !== null}
         unchanged={unchanged}

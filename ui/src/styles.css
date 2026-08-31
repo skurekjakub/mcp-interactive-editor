@@ -746,6 +746,35 @@ button {
   max-height: 140px;
 }
 
+/* The comment box, at the passage rather than at the far end of the panel.
+   Fixed to the viewport because it is positioned from a selection rectangle,
+   which is measured the same way. */
+.popover {
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--lock);
+  border-radius: var(--radius);
+  background: var(--paper-raised);
+  box-shadow: 0 10px 28px -12px rgba(0, 0, 0, 0.55);
+}
+
+.popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.popover-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* The tray stays put at the foot of the panel while the panes scroll behind it,
    so the highlight you forgot to comment on is never scrolled out of reach. */
 .selection {

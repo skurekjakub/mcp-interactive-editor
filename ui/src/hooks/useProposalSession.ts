@@ -42,6 +42,8 @@ export function useProposalSession(paused: boolean): ProposalSession {
   const [content, setContent] = useState("");
   const [ack, setAck] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  /** The path the opening tool was called with, from the arguments the host hands us. */
+  const [openedPath, setOpenedPath] = useState<string | undefined>(undefined);
 
   // Only the first state to arrive fills the edit buffer. A later one must not:
   // by then the human may have typed, and their draft outranks a re-attach.
@@ -60,6 +62,14 @@ export function useProposalSession(paused: boolean): ProposalSession {
     appInfo: { name: "interactive-editor", version: "0.3.0" },
     capabilities: {},
     onAppCreated: (instance) => {
+      // Arguments arrive before any result does — and now the result does not
+      // arrive at all until the human has decided, because the opening call is
+      // waiting on this panel. The path is how we find the proposal we are for.
+      instance.ontoolinput = (params) => {
+        const path = (params.arguments as { path?: unknown } | undefined)?.path;
+        if (typeof path === "string") setOpenedPath(path);
+      };
+
       instance.ontoolresult = (result) => {
         const payload = result.structuredContent as unknown as OpeningPayload | undefined;
         if (!payload) return;
@@ -84,6 +94,46 @@ export function useProposalSession(paused: boolean): ProposalSession {
 
   const proposalId = state?.proposal.proposalId ?? handle?.proposalId;
   const ready = IS_PREVIEW || isConnected;
+
+  /*
+   * Claim the proposal this panel was opened for.
+   *
+   * The opening call used to return a handle immediately; now it waits for this
+   * panel, so the result that carried the id only arrives once the human has
+   * decided — long after we need it. The host mounts the View on the *call*, so
+   * we are alive first and trade the arguments for the proposal instead.
+   *
+   * Retried, because we are racing the call that created us: the View can mount
+   * before the server has finished making the proposal.
+   */
+  useEffect(() => {
+    if (!bridge || !ready || proposalId) return;
+    let cancelled = false;
+
+    void (async () => {
+      for (let attempt = 0; attempt < 60 && !cancelled; attempt += 1) {
+        try {
+          const result = await bridge.callTool(
+            "editor_pending",
+            openedPath ? { path: openedPath } : {},
+          );
+          const next = result.structuredContent as unknown as EditorState | undefined;
+          if (next?.proposal) {
+            if (!cancelled) adopt(next);
+            return;
+          }
+        } catch (cause) {
+          if (!cancelled) setFailure(messageOf(cause));
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge, ready, proposalId, openedPath, adopt]);
 
   // Attaching is what unlocks the commit tool server-side. Until this lands,
   // nothing can write — including from a host that ignores tool visibility. It

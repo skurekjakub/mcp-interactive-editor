@@ -1,11 +1,12 @@
 import { useCallback, useRef } from "react";
 import type { DiffHunk } from "../../../shared/types.js";
 import { passageFromRows, type Passage, type SelectedRow } from "../../../shared/passages.js";
+import type { SelectionAnchor } from "../lib/anchor.js";
 
 interface DiffPaneProps {
   hunks: DiffHunk[];
   isNewFile: boolean;
-  onSelect?: (passage: Passage | null) => void;
+  onSelect?: (passage: Passage | null, anchor: SelectionAnchor | null) => void;
 }
 
 /**
@@ -18,7 +19,7 @@ export function DiffPane({ hunks, isNewFile, onSelect }: DiffPaneProps) {
 
   const syncSelection = useCallback(() => {
     if (!onSelect) return;
-    onSelect(passageFromRows(selectedRows(rootRef.current)));
+    onSelect(passageFromRows(selectedRows(rootRef.current)), liveSelectionAnchor());
   }, [onSelect]);
 
   if (hunks.length === 0) {
@@ -68,4 +69,17 @@ function selectedRows(root: HTMLElement | null): SelectedRow[] {
   return Array.from(root.querySelectorAll<HTMLElement>(".dline"))
     .filter((row) => range.intersectsNode(row))
     .map((row) => ({ line: Number(row.dataset.line ?? 0), text: row.dataset.text ?? "" }));
+}
+
+/**
+ * Where the selection is on screen, so a comment box can open beside it. This
+ * pane is real DOM, so the range knows its own rectangle.
+ */
+function liveSelectionAnchor(): SelectionAnchor | null {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return null;
+  return { top: rect.top, bottom: rect.bottom, left: rect.left };
 }

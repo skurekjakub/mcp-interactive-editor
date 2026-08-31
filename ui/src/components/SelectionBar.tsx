@@ -10,13 +10,10 @@ import {
 const MAX_NOTE_HEIGHT = 120;
 
 interface SelectionBarProps {
-  /** The live selection, not yet pinned. */
-  pending: Passage | null;
   /** Regions already pinned. Shown in reading order, not the order they were clicked. */
   passages: Passage[];
   path: string;
   sending: boolean;
-  onAttach: (passage: Passage) => void;
   onAnnotate: (id: string, note: string) => void;
   onRemove: (id: string) => void;
   onSend: (note: string) => void;
@@ -33,11 +30,9 @@ interface SelectionBarProps {
  * makes you re-select everything to add the one you forgot.
  */
 export function SelectionBar({
-  pending,
   passages,
   path,
   sending,
-  onAttach,
   onAnnotate,
   onRemove,
   onSend,
@@ -46,7 +41,6 @@ export function SelectionBar({
   const [note, setNote] = useState("");
 
   const ordered = sortPassages(passages);
-  const alreadyAttached = pending !== null && passages.some((p) => p.id === pending.id);
   const waiting = unanswered(passages);
   const nothingPinned = passages.length === 0;
   const blocked = nothingPinned || waiting.length > 0;
@@ -86,21 +80,6 @@ export function SelectionBar({
         </div>
       ) : null}
 
-      {pending ? (
-        <div className="selection-quote">
-          <span className="selection-range">{rangeOf(pending)}</span>
-          <code className="selection-excerpt">{excerpt(pending.text)}</code>
-          <button
-            className="btn btn-quiet"
-            type="button"
-            onClick={() => onAttach(pending)}
-            disabled={alreadyAttached}
-          >
-            {alreadyAttached ? "Added" : "+ Add"}
-          </button>
-        </div>
-      ) : null}
-
       <form
         className="selection-ask"
         onSubmit={(event) => {
@@ -112,7 +91,7 @@ export function SelectionBar({
           className="selection-input"
           rows={1}
           value={note}
-          placeholder="Anything else, about all of them together? Optional."
+          placeholder="Anything that applies to all of them? Optional."
           aria-label="An optional message about all the highlights together"
           onChange={(event) => setNote(event.target.value)}
           disabled={sending}

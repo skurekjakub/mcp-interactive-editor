@@ -1,5 +1,6 @@
 import type { DiffHunk, TargetInfo } from "../../../shared/types.js";
 import type { Passage } from "../../../shared/passages.js";
+import type { SelectionAnchor } from "../lib/anchor.js";
 import { Editor } from "./Editor.js";
 import { DiffPane } from "./DiffPane.js";
 import { ViewToggle, type View } from "./ViewToggle.js";
@@ -10,7 +11,7 @@ interface ReviewPanesProps {
   content: string;
   onContentChange: (next: string) => void;
   /** Both panes report selections; whichever you last dragged in wins. */
-  onSelect: (passage: Passage | null) => void;
+  onSelect: (passage: Passage | null, anchor: SelectionAnchor | null) => void;
   hunks: DiffHunk[];
   target: TargetInfo;
   isDelete: boolean;

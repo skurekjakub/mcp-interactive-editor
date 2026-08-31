@@ -1,11 +1,12 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { passageFromSelection, type Passage } from "../../../shared/passages.js";
+import type { SelectionAnchor } from "../lib/anchor.js";
 
 interface EditorProps {
   value: string;
   readOnly?: boolean;
   onChange: (next: string) => void;
-  onSelect?: (passage: Passage | null) => void;
+  onSelect?: (passage: Passage | null, anchor: SelectionAnchor | null) => void;
 }
 
 /**
@@ -17,6 +18,14 @@ interface EditorProps {
  */
 export function Editor({ value, readOnly, onChange, onSelect }: EditorProps) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  /*
+   * A textarea will not tell you where a character range sits on screen — there
+   * is no rect for a selection inside one, only for the box as a whole. So the
+   * last place the pointer was released stands in for it, which is where the
+   * selection ended and close enough to open a box beside. Keyboard selections
+   * have no pointer, and fall back to the top of the field.
+   */
+  const pointer = useRef<{ x: number; y: number } | null>(null);
   const lineCount = value === "" ? 1 : value.split("\n").length;
 
   // The textarea grows to its content so the pane scrolls as one surface and
@@ -38,7 +47,8 @@ export function Editor({ value, readOnly, onChange, onSelect }: EditorProps) {
     if (!onSelect) return;
     const area = areaRef.current;
     if (!area) return;
-    onSelect(passageFromSelection(area.value, area.selectionStart, area.selectionEnd));
+    const selected = passageFromSelection(area.value, area.selectionStart, area.selectionEnd);
+    onSelect(selected, selected ? anchorFor(area, pointer.current) : null);
   }, [onSelect]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -70,12 +80,24 @@ export function Editor({ value, readOnly, onChange, onSelect }: EditorProps) {
         onKeyDown={handleKeyDown}
         onSelect={syncSelection}
         onKeyUp={syncSelection}
-        onMouseUp={syncSelection}
+        onMouseUp={(event) => {
+          pointer.current = { x: event.clientX, y: event.clientY };
+          syncSelection();
+        }}
         onChange={(event) => {
           onChange(event.target.value);
-          onSelect?.(null);
+          onSelect?.(null, null);
         }}
       />
     </div>
   );
+}
+
+function anchorFor(
+  area: HTMLTextAreaElement,
+  pointer: { x: number; y: number } | null,
+): SelectionAnchor {
+  if (pointer) return { top: pointer.y - 10, bottom: pointer.y + 10, left: pointer.x };
+  const rect = area.getBoundingClientRect();
+  return { top: rect.top, bottom: rect.top + 20, left: rect.left };
 }
