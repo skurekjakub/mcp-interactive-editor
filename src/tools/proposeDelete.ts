@@ -4,8 +4,10 @@ import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { buildEditorState, createProposal } from "../proposals.js";
 import { VIEW_URI, type ToolContext } from "./context.js";
 import { openerResult } from "./results.js";
+import { waitForReview } from "./awaitReview.js";
 
-export function registerProposeDelete(server: McpServer, { guard }: ToolContext): void {
+export function registerProposeDelete(server: McpServer, context: ToolContext): void {
+  const { guard } = context;
   registerAppTool(
     server,
     "propose_delete",
@@ -28,7 +30,8 @@ export function registerProposeDelete(server: McpServer, { guard }: ToolContext)
         mode: "delete",
         rationale,
       });
-      return openerResult(buildEditorState(guard, proposal));
+      const opened = openerResult(buildEditorState(guard, proposal));
+      return waitForReview(context, proposal.proposalId, opened);
     },
   );
 }

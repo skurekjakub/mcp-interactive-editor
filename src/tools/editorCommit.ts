@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import type { ToolContext } from "./context.js";
 import { commit } from "./commit.js";
+import { resolveReview } from "../review.js";
 import { describeReceipt } from "./results.js";
 
 export function registerEditorCommit(server: McpServer, context: ToolContext): void {
@@ -21,6 +22,8 @@ export function registerEditorCommit(server: McpServer, context: ToolContext): v
     },
     async ({ proposalId }) => {
       const receipt = await commit(context, proposalId);
+      // Ends the wait the opening tool call is sitting in.
+      resolveReview(proposalId, { kind: "committed", receipt });
       return {
         content: [{ type: "text", text: describeReceipt(receipt) }],
         structuredContent: receipt as unknown as Record<string, unknown>,

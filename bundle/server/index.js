@@ -28848,6 +28848,35 @@ function Y3(Z) {
   return Z.extensions?.[TQ];
 }
 
+// src/review.ts
+var REVIEW_TIMEOUT_MS = 10 * 60 * 1e3;
+var REVIEW_GRACE_MS = 4e3;
+var waiting = /* @__PURE__ */ new Map();
+function awaitReview(proposalId, timeoutMs = REVIEW_TIMEOUT_MS) {
+  if (waiting.has(proposalId)) {
+    throw new Error(`Already waiting on a review for ${proposalId}.`);
+  }
+  return new Promise((resolve4) => {
+    const timer = setTimeout(() => {
+      waiting.delete(proposalId);
+      resolve4({
+        kind: "unanswered",
+        why: `Nobody responded in the editor within ${Math.round(timeoutMs / 6e4)} minutes.`
+      });
+    }, timeoutMs);
+    timer.unref?.();
+    waiting.set(proposalId, { resolve: resolve4, timer });
+  });
+}
+function resolveReview(proposalId, outcome) {
+  const found = waiting.get(proposalId);
+  if (!found) return false;
+  clearTimeout(found.timer);
+  waiting.delete(proposalId);
+  found.resolve(outcome);
+  return true;
+}
+
 // src/tools/view.ts
 import { readFile as readFile2 } from "node:fs/promises";
 import { dirname as dirname2, resolve as resolve2 } from "node:path";
@@ -29288,6 +29317,12 @@ function diffStatsFor(proposal) {
   const after = proposal.mode === "delete" ? "" : proposal.content;
   return diffLines(proposal.baseline, after).stats;
 }
+function findOpenProposal(path) {
+  const open = [...proposals.values()].filter(
+    (p2) => !p2.committedAt && (path === void 0 || p2.target.requested === path)
+  );
+  return open[open.length - 1];
+}
 
 // src/tools/results.ts
 var MODEL_DIFF_LINE_BUDGET = 80;
@@ -29367,14 +29402,71 @@ function errorResult(message) {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+// src/tools/awaitReview.ts
+async function waitForReview(context, proposalId, opened) {
+  if (!context.canRenderPanel()) return opened;
+  const settled = awaitReview(proposalId, context.reviewTimeoutMs);
+  if (!await attachedWithin(proposalId, context.reviewGraceMs)) {
+    resolveReview(proposalId, {
+      kind: "unanswered",
+      why: "This host advertises MCP Apps but no editor attached to the proposal."
+    });
+  }
+  return describeOutcome(await settled, opened);
+}
+async function attachedWithin(proposalId, graceMs) {
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    if (getProposal(proposalId).attached) return true;
+    await new Promise((r2) => setTimeout(r2, 25));
+  }
+  return getProposal(proposalId).attached;
+}
+function describeOutcome(outcome, opened) {
+  switch (outcome.kind) {
+    case "committed":
+      return {
+        content: [{ type: "text", text: describeReceipt(outcome.receipt) }],
+        structuredContent: outcome.receipt
+      };
+    case "changes-requested":
+      return {
+        content: [
+          {
+            type: "text",
+            text: `The human read this and asked for changes. Nothing was written.
+
+${outcome.message}
+
+Redraft and propose again. Do not commit anything in the meantime, and do not re-propose the same content.`
+          }
+        ],
+        structuredContent: { outcome: "changes-requested", message: outcome.message }
+      };
+    case "discarded":
+      return {
+        content: [
+          {
+            type: "text",
+            text: "The human discarded this. Nothing was written." + (outcome.reason ? ` Reason: ${outcome.reason}` : "") + " Do not propose it again unless they ask."
+          }
+        ],
+        structuredContent: { outcome: "discarded", reason: outcome.reason ?? null }
+      };
+    case "unanswered":
+      return opened;
+  }
+}
+
 // src/tools/proposeWrite.ts
-function registerProposeWrite(server, { guard }) {
+function registerProposeWrite(server, context) {
+  const { guard } = context;
   K3(
     server,
     "propose_write",
     {
       title: "Propose a file write",
-      description: "Open an editable review panel for writing a file. Shows the human a diff against what is on disk, lets them edit your proposed content directly, and waits for them to press the button. This tool NEVER writes anything itself \u2014 it only opens the editor. Use it for every file write instead of writing directly. Returns the diff so you can see what you proposed.",
+      description: "Open an editable review panel for writing a file. Shows the human a diff against what is on disk, lets them edit your proposed content directly, and waits for them to decide. This tool NEVER writes anything itself. It does not return until they act: either they accept it and the result is a receipt for what landed, or they comment on it, which is a rejection \u2014 nothing is written and the result carries what they want changed, for you to redraft and propose again.",
       inputSchema: {
         path: external_exports.string().describe("File to write. Absolute, or relative to the first configured root."),
         content: external_exports.string().describe("The full new contents of the file."),
@@ -29391,13 +29483,15 @@ function registerProposeWrite(server, { guard }) {
         mode: target.exists ? "overwrite" : "create",
         rationale
       });
-      return openerResult(buildEditorState(guard, proposal));
+      const opened = openerResult(buildEditorState(guard, proposal));
+      return waitForReview(context, proposal.proposalId, opened);
     }
   );
 }
 
 // src/tools/openFile.ts
-function registerOpenFile(server, { guard }) {
+function registerOpenFile(server, context) {
+  const { guard } = context;
   K3(
     server,
     "open_file",
@@ -29420,13 +29514,15 @@ function registerOpenFile(server, { guard }) {
         mode: target.exists ? "overwrite" : "create",
         rationale: note ?? "Opened for editing. Nothing changes until it is saved."
       });
-      return openedFileResult(buildEditorState(guard, proposal));
+      const opened = openedFileResult(buildEditorState(guard, proposal));
+      return waitForReview(context, proposal.proposalId, opened);
     }
   );
 }
 
 // src/tools/proposeDelete.ts
-function registerProposeDelete(server, { guard }) {
+function registerProposeDelete(server, context) {
+  const { guard } = context;
   K3(
     server,
     "propose_delete",
@@ -29447,7 +29543,8 @@ function registerProposeDelete(server, { guard }) {
         mode: "delete",
         rationale
       });
-      return openerResult(buildEditorState(guard, proposal));
+      const opened = openerResult(buildEditorState(guard, proposal));
+      return waitForReview(context, proposal.proposalId, opened);
     }
   );
 }
@@ -29568,6 +29665,7 @@ function registerEditorCommit(server, context) {
     },
     async ({ proposalId }) => {
       const receipt = await commit(context, proposalId);
+      resolveReview(proposalId, { kind: "committed", receipt });
       return {
         content: [{ type: "text", text: describeReceipt(receipt) }],
         structuredContent: receipt
@@ -29590,6 +29688,7 @@ function registerEditorDiscard(server, _ctx) {
     async ({ proposalId, reason }) => {
       const proposal = getProposal(proposalId);
       updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      resolveReview(proposalId, { kind: "discarded", ...reason ? { reason } : {} });
       return {
         content: [
           {
@@ -29598,6 +29697,67 @@ function registerEditorDiscard(server, _ctx) {
           }
         ]
       };
+    }
+  );
+}
+
+// src/tools/editorRequestChanges.ts
+function registerEditorRequestChanges(server, _context) {
+  K3(
+    server,
+    "editor_request_changes",
+    {
+      title: "Send the human's comments back and reject the draft",
+      description: "Called by the panel when the human comments instead of accepting. Not for agent use.",
+      inputSchema: {
+        proposalId: external_exports.string(),
+        message: external_exports.string().describe("The human's comments, already quoted against their lines.")
+      },
+      _meta: { ui: { visibility: ["app"] } }
+    },
+    async ({ proposalId, message }) => {
+      const proposal = getProposal(proposalId);
+      updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      const waited = resolveReview(proposalId, { kind: "changes-requested", message });
+      return {
+        content: [
+          {
+            type: "text",
+            text: waited ? `Sent back for a redraft. Nothing was written to ${proposal.target.display}.` : (
+              // No opening call was waiting — a terminal host, or one that
+              // already timed out. Say so rather than pretending it landed.
+              `Nothing was waiting on this review, so the comments have nowhere to go. Nothing was written to ${proposal.target.display}.`
+            )
+          }
+        ],
+        structuredContent: { delivered: waited }
+      };
+    }
+  );
+}
+
+// src/tools/editorPending.ts
+function registerEditorPending(server, { guard }) {
+  K3(
+    server,
+    "editor_pending",
+    {
+      title: "Claim the proposal this panel was opened for",
+      description: "Called by the panel when it mounts before the opening call returns. Not for agent use.",
+      inputSchema: {
+        path: external_exports.string().optional().describe("Narrow to one file, from the arguments the panel was handed.")
+      },
+      _meta: { ui: { visibility: ["app"] } }
+    },
+    async ({ path }) => {
+      const proposal = findOpenProposal(path);
+      if (!proposal) {
+        return {
+          content: [{ type: "text", text: "No proposal is open." }],
+          structuredContent: { open: false }
+        };
+      }
+      return panelResult(buildEditorState(guard, proposal), "Claimed the open proposal.");
     }
   );
 }
@@ -29671,6 +29831,8 @@ function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
     guard,
     commitVisibility: options.commitVisibility,
     terminalApproval: options.terminalApproval ?? false,
+    reviewTimeoutMs: options.reviewTimeoutMs ?? REVIEW_TIMEOUT_MS,
+    reviewGraceMs: options.reviewGraceMs ?? REVIEW_GRACE_MS,
     canRenderPanel: () => hostRendersPanel(server)
   };
   registerEditorView(server);
@@ -29681,6 +29843,8 @@ function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
   registerEditorUpdate(server, context);
   registerEditorCommit(server, context);
   registerEditorDiscard(server, context);
+  registerEditorRequestChanges(server, context);
+  registerEditorPending(server, context);
   registerReadFile(server, context);
   registerListRoots(server, context);
 }
@@ -29708,6 +29872,10 @@ function parseArgs(argv) {
       cli.roots.push(process.cwd());
     } else if (arg === "--terminal-approval") {
       cli.terminalApproval = true;
+    } else if (arg === "--review-timeout-ms") {
+      cli.reviewTimeoutMs = Number(argv[++i]);
+    } else if (arg === "--review-grace-ms") {
+      cli.reviewGraceMs = Number(argv[++i]);
     } else if (arg === "--root") {
       const value = argv[++i];
       if (!value) throw new Error("--root needs a directory");
@@ -29753,6 +29921,8 @@ Options:
   --terminal-approval          Expose the commit tool to the agent, for hosts that
                                cannot render the editor. You get your client's
                                approve/deny prompt instead of an editor. Weaker.
+  --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
+  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 4000.
   -h, --help                   This.
 
 Every write goes through a View the human edits and approves. The agent can open
@@ -29782,7 +29952,12 @@ ${HELP}`);
       instructions: "propose_write opens an editable review panel: the human gets a live diff against disk, edits your draft in place, and saves. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves. Passages they select in either pane come back to you as quotes with line numbers."
     }
   );
-  registerTools(server, guard, { commitVisibility, terminalApproval: cli.terminalApproval });
+  registerTools(server, guard, {
+    commitVisibility,
+    terminalApproval: cli.terminalApproval,
+    ...cli.reviewTimeoutMs !== void 0 ? { reviewTimeoutMs: cli.reviewTimeoutMs } : {},
+    ...cli.reviewGraceMs !== void 0 ? { reviewGraceMs: cli.reviewGraceMs } : {}
+  });
   process.stderr.write(
     `interactive-editor ready. Roots:
 ${guard.roots.map((r2) => `  ${r2}`).join("\n")}

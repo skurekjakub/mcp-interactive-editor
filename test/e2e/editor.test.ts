@@ -58,7 +58,10 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
   async function connect(args: string[], capabilities = RENDERS_PANEL): Promise<Client> {
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [SERVER, ...args],
+      // An opening call now waits for the human, so the timings are pinned
+      // small here: a test that never attaches a panel should fall straight
+      // through the grace period rather than sit out the real four seconds.
+      args: [SERVER, "--review-grace-ms", "250", "--review-timeout-ms", "4000", ...args],
       stderr: "ignore",
     });
     const connected = new Client({ name: "editor-tests", version: "1.0.0" }, { capabilities });
@@ -510,6 +513,110 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
 
       await terminal.close();
       await rm(optedIn, { recursive: true, force: true });
+    });
+  });
+
+  /**
+   * The gate. `propose_write` does not return when the panel opens, it returns
+   * what happened in it — so the agent learns its draft was rejected in the
+   * result of the call it already made, rather than in a message someone has to
+   * tell it to go and read.
+   *
+   * These drive it the way the panel does: start the call, do not await it,
+   * claim the proposal, act, then see what the call became.
+   */
+  describe("the review gate", () => {
+    /**
+     * What the panel does on mount, before any result carrying an id exists.
+     * Retried, because the panel is racing the tool call that created it — the
+     * host mounts the View on the call, not on the proposal being ready.
+     */
+    const claim = async (path: string) => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const found = (await call("editor_pending", { path })) as CallToolResult;
+        const payload = found.structuredContent as unknown as EditorState | undefined;
+        if (payload?.proposal) return payload.proposal.proposalId;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      throw new Error(`no proposal ever opened for ${path}`);
+    };
+
+    it("commenting rejects the draft and hands the words back to the agent", async () => {
+      const target = join(root, "redraft-me.txt");
+      const opening = call("propose_write", { path: target, content: "first attempt\n" });
+
+      const id = await claim(target);
+      await attach(id);
+      await call("editor_request_changes", {
+        proposalId: id,
+        message: "line 1: too terse, say why it exists",
+      });
+
+      const result = await opening;
+
+      expect(text(result)).toMatch(/asked for changes/i);
+      expect(text(result)).toContain("too terse, say why it exists");
+      expect(text(result), "the agent must be told to redraft").toMatch(/redraft/i);
+      expect(
+        (result.structuredContent as { outcome?: string })?.outcome,
+        "a rejection must not read as a receipt",
+      ).toBe("changes-requested");
+      await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
+    });
+
+    it("accepting without comment commits, and the call returns the receipt", async () => {
+      const target = join(root, "accepted.txt");
+      const opening = call("propose_write", { path: target, content: "accepted as proposed\n" });
+
+      const id = await claim(target);
+      await attach(id);
+      await call("editor_commit", { proposalId: id });
+
+      const result = await opening;
+
+      expect(text(result)).toMatch(/^Wrote /);
+      expect((result.structuredContent as unknown as CommitReceipt).ok).toBe(true);
+      expect(await readFile(target, "utf8")).toBe("accepted as proposed\n");
+    });
+
+    it("discarding ends the call too, so nothing is left hanging", async () => {
+      const target = join(root, "thrown-away.txt");
+      const opening = call("propose_write", { path: target, content: "nope\n" });
+
+      const id = await claim(target);
+      await attach(id);
+      await call("editor_discard", { proposalId: id, reason: "wrong file" });
+
+      const result = await opening;
+
+      expect(text(result)).toMatch(/discarded/i);
+      expect(text(result)).toContain("wrong file");
+      await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
+    });
+
+    it("a rejected proposal cannot then be committed by a stale panel", async () => {
+      const target = join(root, "rejected-then-committed.txt");
+      const opening = call("propose_write", { path: target, content: "should never land\n" });
+
+      const id = await claim(target);
+      await attach(id);
+      await call("editor_request_changes", { proposalId: id, message: "no" });
+      await opening;
+
+      await refusal("editor_commit", { proposalId: id }, /already been resolved/i);
+      await expect(readFile(target, "utf8")).rejects.toThrow(/ENOENT/);
+    });
+
+    it("returns the diff instead of hanging when no panel ever attaches", async () => {
+      // The host said it renders MCP Apps; no View turned up. That is a promise
+      // broken by the host, and it must not cost the agent a ten minute stall.
+      const opened = await call("propose_write", {
+        path: join(root, "no-panel-came.txt"),
+        content: "still useful as text\n",
+      });
+
+      expect(text(opened)).toMatch(/nothing has been written/i);
+      expect(text(opened)).toContain("+still useful as text");
     });
   });
 

@@ -91,3 +91,18 @@ export function diffStatsFor(proposal: Proposal) {
   const after = proposal.mode === "delete" ? "" : proposal.content;
   return diffLines(proposal.baseline, after).stats;
 }
+
+/**
+ * The newest proposal still open, optionally for one path.
+ *
+ * The panel mounts on the tool *call*, before the call returns, so it is handed
+ * the arguments but not the id. This is how it claims the proposal it was opened
+ * for. Newest-first because a second proposal on the same path supersedes the
+ * one before it.
+ */
+export function findOpenProposal(path?: string): Proposal | undefined {
+  const open = [...proposals.values()].filter(
+    (p) => !p.committedAt && (path === undefined || p.target.requested === path),
+  );
+  return open[open.length - 1];
+}

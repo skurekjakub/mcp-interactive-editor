@@ -11,6 +11,8 @@ interface Cli {
   deny: string[];
   dryRun: boolean;
   terminalApproval: boolean;
+  reviewTimeoutMs?: number;
+  reviewGraceMs?: number;
 }
 
 /** MCPB bundles cannot add a flag conditionally, so dry run is also an env var. */
@@ -36,6 +38,10 @@ function parseArgs(argv: string[]): Cli {
       cli.roots.push(process.cwd());
     } else if (arg === "--terminal-approval") {
       cli.terminalApproval = true;
+    } else if (arg === "--review-timeout-ms") {
+      cli.reviewTimeoutMs = Number(argv[++i]);
+    } else if (arg === "--review-grace-ms") {
+      cli.reviewGraceMs = Number(argv[++i]);
     } else if (arg === "--root") {
       const value = argv[++i];
       if (!value) throw new Error("--root needs a directory");
@@ -84,6 +90,8 @@ Options:
   --terminal-approval          Expose the commit tool to the agent, for hosts that
                                cannot render the editor. You get your client's
                                approve/deny prompt instead of an editor. Weaker.
+  --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
+  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 4000.
   -h, --help                   This.
 
 Every write goes through a View the human edits and approves. The agent can open
@@ -120,7 +128,12 @@ async function main(): Promise<void> {
     },
   );
 
-  registerTools(server, guard, { commitVisibility, terminalApproval: cli.terminalApproval });
+  registerTools(server, guard, {
+    commitVisibility,
+    terminalApproval: cli.terminalApproval,
+    ...(cli.reviewTimeoutMs !== undefined ? { reviewTimeoutMs: cli.reviewTimeoutMs } : {}),
+    ...(cli.reviewGraceMs !== undefined ? { reviewGraceMs: cli.reviewGraceMs } : {}),
+  });
 
   // stdout is the transport; anything logged there corrupts the protocol.
   process.stderr.write(
