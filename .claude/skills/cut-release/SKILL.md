@@ -34,17 +34,30 @@ indistinguishable from "the restart did not work".
 5. **Commit and push**, and wait for CI to be green on all three platforms.
    `git status` should show `bundle/` changed alongside the sources.
 
-6. **`gh workflow run release.yml -f version=<x.y.z>`.** Dispatch-only on
-   purpose: releasing on a tag push makes the tag the decision, and a tag cannot
-   be withdrawn once an install has resolved it. The workflow refuses a version
-   the tree does not declare, one already tagged, and one the changelog does not
-   describe — then verifies, packs, tags and uploads the `.mcpb`.
+6. **`gh workflow run release.yml -f version=<x.y.z>`.** That is the whole
+   release. Dispatch-only on purpose: releasing on a tag push makes the tag the
+   decision, and a tag cannot be withdrawn once an install has resolved it. The
+   workflow refuses a version the tree does not declare, one already tagged, and
+   one the changelog does not describe — then verifies, packs, writes
+   `server.json` from the artifact's hash, commits it, tags, and uploads.
 
-7. **Update `server.json` on `main`** — version, identifier URL and
-   `fileSha256`. Take the hash by **downloading the published asset back** and
-   hashing that, not from a local `npm run pack`: packing is not reproducible
-   (zip entries carry mtimes), so a second build hashes to something other than
-   the file registry clients actually verify.
+7. **`git pull`**, because the workflow committed `server.json` to the branch.
+
+## Nothing about the release may be committed after the tag
+
+`server.json` names the artifact and its `fileSha256`, so it cannot be written
+before the artifact exists — and if it is written _after_ the tag, the tagged
+tree describes the **previous** release. Check out that tag and you get a
+`server.json` pointing at the old download with the old checksum, permanently.
+
+The workflow resolves it by doing everything in one run: pack, hash, write,
+commit, _then_ tag. If you ever release by hand, keep that order. The rule
+generalises — anything describing the release belongs in the commit the tag
+lands on, not after it.
+
+Packing is not reproducible (zip entries carry mtimes), so the hash must come
+from the artifact that is actually uploaded. A second local `npm run pack`
+produces a different file and therefore a checksum registry clients will reject.
 
 ## Cross-platform failures you will only see in CI
 
