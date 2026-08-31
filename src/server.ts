@@ -91,7 +91,7 @@ Options:
                                cannot render the editor. You get your client's
                                approve/deny prompt instead of an editor. Weaker.
   --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
-  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 4000.
+  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 30000.
   -h, --help                   This.
 
 Every write goes through a View the human edits and approves. The agent can open
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     : ["app"];
 
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.4.1" },
+    { name: "interactive-editor", version: "0.4.2" },
     {
       instructions:
         "propose_write opens an editable review panel and does not return until the human has " +

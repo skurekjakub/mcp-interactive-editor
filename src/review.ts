@@ -12,8 +12,17 @@ import type { ReviewOutcome } from "../shared/types.js";
 /** Long enough to actually read a diff, short enough that a walked-away review ends. */
 export const REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** Long enough for a panel to mount and attach, short enough not to stall a host that will not. */
-export const REVIEW_GRACE_MS = 4000;
+/**
+ * Long enough for a panel to mount and attach, short enough not to stall a host
+ * that never will.
+ *
+ * Generous on purpose. A first mount has to fetch a half-megabyte UI resource,
+ * boot an iframe, run React, finish the ui/initialize handshake and only then
+ * call a tool. This was four seconds and the panel lost that race every time:
+ * the grace expired, the call returned "nobody answered", and the review that
+ * was supposed to block simply did not.
+ */
+export const REVIEW_GRACE_MS = 30_000;
 
 interface Waiting {
   resolve: (outcome: ReviewOutcome) => void;

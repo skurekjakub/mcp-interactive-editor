@@ -746,6 +746,14 @@ button {
   max-height: 140px;
 }
 
+/* Which step the panel is on while it opens. Quiet, but present: a stall that
+   names its step is a bug report, and a bare spinner is not. */
+.status-phase {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
 /* The comment box, at the passage rather than at the far end of the panel.
    Fixed to the viewport because it is positioned from a selection rectangle,
    which is measured the same way. */

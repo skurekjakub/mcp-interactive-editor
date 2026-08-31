@@ -6,6 +6,10 @@ import { messageOf } from "../lib/results.js";
 
 const PUSH_DEBOUNCE_MS = 500;
 
+/** How long to keep asking for the proposal. Must outlast the server's grace. */
+const CLAIM_TIMEOUT_MS = 30_000;
+const CLAIM_RETRY_MS = 100;
+
 /** The openers send a handle, the panel's own calls send full state. Accept either. */
 type OpeningPayload = Partial<ProposalHandle> & Partial<EditorState>;
 
@@ -21,6 +25,8 @@ export interface ProposalSession {
   setAck: (next: boolean) => void;
   /** The host connection failed; nothing else will work. */
   hostError: Error | null;
+  /** Where the panel has got to, so a stall says which step it stalled on. */
+  phase: "connecting" | "claiming" | "attaching" | "ready";
   failure: string | null;
   setFailure: (next: string | null) => void;
 }
@@ -44,6 +50,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
   const [failure, setFailure] = useState<string | null>(null);
   /** The path the opening tool was called with, from the arguments the host hands us. */
   const [openedPath, setOpenedPath] = useState<string | undefined>(undefined);
+  const [phase, setPhase] = useState<ProposalSession["phase"]>("connecting");
 
   // Only the first state to arrive fills the edit buffer. A later one must not:
   // by then the human may have typed, and their draft outranks a re-attach.
@@ -59,7 +66,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
   }, []);
 
   const { app, isConnected, error } = useApp({
-    appInfo: { name: "interactive-editor", version: "0.4.1" },
+    appInfo: { name: "interactive-editor", version: "0.4.2" },
     capabilities: {},
     onAppCreated: (instance) => {
       // Arguments arrive before any result does — and now the result does not
@@ -107,11 +114,13 @@ export function useProposalSession(paused: boolean): ProposalSession {
    * before the server has finished making the proposal.
    */
   useEffect(() => {
-    if (!bridge || !ready || proposalId) return;
+    if (!bridge || !ready || state) return;
     let cancelled = false;
+    setPhase("claiming");
 
     void (async () => {
-      for (let attempt = 0; attempt < 60 && !cancelled; attempt += 1) {
+      const deadline = Date.now() + CLAIM_TIMEOUT_MS;
+      while (!cancelled && Date.now() < deadline) {
         try {
           const result = await bridge.callTool(
             "editor_pending",
@@ -126,14 +135,19 @@ export function useProposalSession(paused: boolean): ProposalSession {
           if (!cancelled) setFailure(messageOf(cause));
           return;
         }
-        await new Promise((r) => setTimeout(r, 50));
+        await new Promise((r) => setTimeout(r, CLAIM_RETRY_MS));
+      }
+      if (!cancelled) {
+        setFailure(
+          "No proposal was open for this panel, and asking for one kept coming back empty.",
+        );
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [bridge, ready, proposalId, openedPath, adopt]);
+  }, [bridge, ready, state, openedPath, adopt]);
 
   // Attaching is what unlocks the commit tool server-side. Until this lands,
   // nothing can write — including from a host that ignores tool visibility. It
@@ -141,11 +155,14 @@ export function useProposalSession(paused: boolean): ProposalSession {
   useEffect(() => {
     if (!bridge || !ready || !proposalId) return;
     let cancelled = false;
+    setPhase("attaching");
     void bridge
       .callTool("editor_attach", { proposalId })
       .then((result) => {
         const next = result.structuredContent as unknown as EditorState | undefined;
-        if (!cancelled) adopt(next);
+        if (cancelled) return;
+        adopt(next);
+        if (next?.proposal) setPhase("ready");
       })
       .catch((cause: unknown) => {
         if (!cancelled) setFailure(messageOf(cause));
@@ -188,6 +205,7 @@ export function useProposalSession(paused: boolean): ProposalSession {
     ack,
     setAck,
     hostError: error,
+    phase,
     failure,
     setFailure,
   };

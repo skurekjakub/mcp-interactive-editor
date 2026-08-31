@@ -28850,7 +28850,7 @@ function Y3(Z) {
 
 // src/review.ts
 var REVIEW_TIMEOUT_MS = 10 * 60 * 1e3;
-var REVIEW_GRACE_MS = 4e3;
+var REVIEW_GRACE_MS = 3e4;
 var waiting = /* @__PURE__ */ new Map();
 function awaitReview(proposalId, timeoutMs = REVIEW_TIMEOUT_MS) {
   if (waiting.has(proposalId)) {
@@ -29922,7 +29922,7 @@ Options:
                                cannot render the editor. You get your client's
                                approve/deny prompt instead of an editor. Weaker.
   --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
-  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 4000.
+  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 30000.
   -h, --help                   This.
 
 Every write goes through a View the human edits and approves. The agent can open
@@ -29947,7 +29947,7 @@ ${HELP}`);
   const guard = new FsGuard({ roots: cli.roots, deny: cli.deny, dryRun: cli.dryRun });
   const commitVisibility = cli.terminalApproval ? ["model", "app"] : ["app"];
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.4.1" },
+    { name: "interactive-editor", version: "0.4.2" },
     {
       instructions: "propose_write opens an editable review panel and does not return until the human has decided. Accept with no comment and it commits, and the result is a receipt for what landed. Comment on it and that is a rejection: nothing is written, and the result carries their words quoted against the lines they are about \u2014 redraft from those and propose again rather than re-sending the same content. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves."
     }

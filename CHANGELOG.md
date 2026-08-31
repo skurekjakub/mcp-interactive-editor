@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-08-31
+
+### Fixed
+
+- **The review did not actually block, and the panel sat on "Opening…" forever.**
+  Both came from the same place: the grace period the server waits for a panel to
+  attach was four seconds, and the panel's own retry budget was three. A first
+  mount has to fetch a half-megabyte UI resource, boot an iframe, run React,
+  finish the `ui/initialize` handshake and only then call a tool — it lost that
+  race every time. The grace expired, `propose_write` returned "nobody
+  answered", and the agent carried on as though there had been no review. Both
+  budgets are now 30 seconds.
+- **A stall said nothing about why.** The loading branch rendered a bare
+  "Opening …" and never read `failure`, so a failed claim or a failed attach
+  looked exactly like a slow one. It now names the step it is on — waiting for
+  the host, claiming the proposal, attaching — and shows the error when there is
+  one.
+- The panel kept retrying only until it had a proposal _id_. An id arriving from
+  the handle with a failed attach behind it left nothing retrying, so it stayed
+  on the loading screen with a proposal it never fetched. It now retries until it
+  has the proposal itself.
+
 ## [0.4.1] — 2026-08-31
 
 ### Fixed
@@ -235,7 +257,8 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.1...v0.3.0

@@ -100,7 +100,27 @@ export function App() {
     );
   }
   if (!state || !local) {
-    return <div className="status">Opening {handle?.display ?? "the editor"}…</div>;
+    /*
+     * Say which step this is stuck on, and show the reason if there is one.
+     *
+     * This used to be a bare "Opening …" that rendered whatever happened, so a
+     * failed claim or a failed attach looked exactly like a slow one — a
+     * spinner forever, with the actual error sitting in state that nothing on
+     * this branch ever read.
+     */
+    return (
+      <div className="status">
+        <div>Opening {handle?.display ?? "the editor"}…</div>
+        <div className="status-phase">
+          {session.phase === "connecting"
+            ? "waiting for the host"
+            : session.phase === "claiming"
+              ? "asking the server which proposal this panel is for"
+              : "attaching to the proposal"}
+        </div>
+        {session.failure ? <div className="status-error">{session.failure}</div> : null}
+      </div>
+    );
   }
   if (receipt) return <Receipt receipt={receipt} />;
   // The opening call has returned with the comments; there is nothing left here.
