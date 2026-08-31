@@ -13,7 +13,7 @@
       "registryType": "mcpb",
       "identifier": "https://github.com/skurekjakub/mcp-interactive-editor/releases/download/v0.1.0/mcp-interactive-editor.mcpb",
       "version": "0.1.0",
-      "fileSha256": "05a59cd10e13738a800737dac095ae638d02773418b0b70a4f9876d2fa3dad41",
+      "fileSha256": "3d7e12db0d0492c8dc091e0a2037f1959402f307ccefaf492bdb6e2dd212ae37",
       "transport": {
         "type": "stdio"
       }
