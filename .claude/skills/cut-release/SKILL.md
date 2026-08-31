@@ -22,19 +22,42 @@ indistinguishable from "the restart did not work".
    declaration sites plus the marketplace entry, and the list lives in
    `scripts/versions.mjs` — add a site there, not in the bump script.
 
-3. **Write the `CHANGELOG.md` section.** Newest first, under `## [Unreleased]`.
-   Add the compare link at the foot of the file — it is easy to forget, and 0.6.0
-   shipped without one.
+3. **Write the `CHANGELOG.md` section.** Newest first, under `## [Unreleased]`,
+   heading `## [x.y.z] - YYYY-MM-DD`. The release workflow lifts this section
+   verbatim as the release notes and refuses to run without it, so the heading
+   format is load-bearing. Add the compare link at the foot of the file.
 
 4. **`npm run verify` again**, then **`npm run bundle`**. `bundle/` is checked in
    and CI fails if it drifts from the sources, so it must be rebuilt after the
    bump — the version is baked into it.
 
-5. **Commit.** `git status` should show `bundle/` changed alongside the sources.
+5. **Commit and push**, and wait for CI to be green on all three platforms.
+   `git status` should show `bundle/` changed alongside the sources.
 
-6. **`npm run pack`** if a `.mcpb` is wanted. Packing is not reproducible (zip
-   mtimes), so `server.json`'s `fileSha256` cannot be re-derived locally — take
-   it from the single producing CI run.
+6. **`gh workflow run release.yml -f version=<x.y.z>`.** Dispatch-only on
+   purpose: releasing on a tag push makes the tag the decision, and a tag cannot
+   be withdrawn once an install has resolved it. The workflow refuses a version
+   the tree does not declare, one already tagged, and one the changelog does not
+   describe — then verifies, packs, tags and uploads the `.mcpb`.
+
+7. **Update `server.json` on `main`** — version, identifier URL and
+   `fileSha256`. Take the hash by **downloading the published asset back** and
+   hashing that, not from a local `npm run pack`: packing is not reproducible
+   (zip entries carry mtimes), so a second build hashes to something other than
+   the file registry clients actually verify.
+
+## Cross-platform failures you will only see in CI
+
+`npm run verify` passing locally is not the gate. Both CI platforms rewrite temp
+paths in ways a dev machine usually does not:
+
+- **macOS** resolves `/var/folders/...` into `/private/var/folders/...`.
+- **The Windows runner** hands out 8.3 short paths — `RUNNER~1` for
+  `runneradmin`.
+
+`FsGuard` canonicalises its roots for exactly this reason, so any fixture that
+compares a resolved target against a raw `mkdtemp` path passes locally and fails
+on both runners. Have test fixtures `realpath` their root.
 
 ## What the changelog entry is for
 
