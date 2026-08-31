@@ -29286,7 +29286,7 @@ function registerProposalTools(server, guard) {
         mode: target.exists ? "overwrite" : "create",
         rationale
       });
-      return editorResult(guard, proposal.proposalId);
+      return openerResult(guard, proposal.proposalId);
     }
   );
   K3(
@@ -29334,7 +29334,7 @@ function registerProposalTools(server, guard) {
         mode: "delete",
         rationale
       });
-      return editorResult(guard, proposal.proposalId);
+      return openerResult(guard, proposal.proposalId);
     }
   );
 }
@@ -29351,7 +29351,7 @@ function registerAppOnlyTools(server, guard, options) {
     async ({ proposalId }) => {
       await refreshTarget(guard, getProposal(proposalId));
       updateProposal(proposalId, { attached: true });
-      return editorResult(guard, proposalId);
+      return editorResult(guard, proposalId, "Attached. The panel has the proposal.");
     }
   );
   K3(
@@ -29383,7 +29383,7 @@ function registerAppOnlyTools(server, guard, options) {
           mode: next.mode === "delete" ? "delete" : target.exists ? "overwrite" : "create"
         });
       }
-      return editorResult(guard, proposalId);
+      return editorResult(guard, proposalId, "Updated.");
     }
   );
   K3(
@@ -29508,11 +29508,12 @@ ${blockers.map((b) => `  - ${b}`).join("\n")}`);
     content: proposal.content
   };
 }
-function editorResult(guard, proposalId) {
+var MODEL_DIFF_LINE_BUDGET = 80;
+function openerResult(guard, proposalId) {
   const state = buildEditorState(guard, getProposal(proposalId));
   return {
     content: [{ type: "text", text: describeState(state) }],
-    structuredContent: state
+    structuredContent: handleFor(state)
   };
 }
 function summaryResult(guard, proposalId) {
@@ -29521,6 +29522,22 @@ function summaryResult(guard, proposalId) {
   const text = target.absolute ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : `Refused: "${target.requested}" is outside the roots this editor will write to.`;
   return {
     content: [{ type: "text", text }],
+    structuredContent: handleFor(state)
+  };
+}
+function handleFor(state) {
+  const { proposal } = state;
+  return {
+    proposalId: proposal.proposalId,
+    display: proposal.target.display,
+    mode: proposal.mode,
+    ...proposal.target.absolute ? {} : { refused: true }
+  };
+}
+function editorResult(guard, proposalId, note) {
+  const state = buildEditorState(guard, getProposal(proposalId));
+  return {
+    content: [{ type: "text", text: note }],
     structuredContent: state
   };
 }
@@ -29548,11 +29565,20 @@ ${state.roots.map((r2) => `  ${r2}`).join("\n")}`;
     lines.push("");
   }
   lines.push(
-    formatUnifiedDiff(state.diff, proposal.target.display),
+    diffForModel(state),
     ``,
     `The human reviews and edits this in the editor, then presses the button. You cannot write the file yourself \u2014 wait for them, and do not re-propose the same write.`
   );
   return lines.join("\n");
+}
+function diffForModel(state) {
+  const full = formatUnifiedDiff(state.diff, state.proposal.target.display);
+  const lines = full.split("\n");
+  if (lines.length <= MODEL_DIFF_LINE_BUDGET) return full;
+  return [
+    ...lines.slice(0, MODEL_DIFF_LINE_BUDGET),
+    `\u2026 and ${lines.length - MODEL_DIFF_LINE_BUDGET} more diff lines, shown in full in the panel.`
+  ].join("\n");
 }
 function describeReceipt(receipt) {
   const verb = receipt.mode === "delete" ? "Deleted" : "Wrote";
@@ -29652,7 +29678,7 @@ ${HELP}`);
   const server = new McpServer(
     { name: "interactive-editor", version: "0.1.0" },
     {
-      instructions: "Every file write in these directories goes through propose_write, which opens a review editor the human edits and approves. You cannot write files here yourself and you cannot approve your own proposal \u2014 the commit tool is not in your tool list. After proposing, stop and wait: the human may edit your content before it lands, and you will be told what actually landed."
+      instructions: "propose_write opens an editable review panel: the human gets a live diff against disk, edits your draft in place, and saves. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves. Passages they select in either pane come back to you as quotes with line numbers."
     }
   );
   registerTools(server, guard, { commitVisibility });

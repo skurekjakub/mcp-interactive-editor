@@ -9,7 +9,7 @@ import {
   registerAppResource,
   registerAppTool,
 } from "@modelcontextprotocol/ext-apps/server";
-import type { CommitReceipt, EditorState } from "../shared/types.js";
+import type { CommitReceipt, EditorState, ProposalHandle } from "../shared/types.js";
 import { formatUnifiedDiff } from "../shared/diff.js";
 import { hasBlockers } from "../shared/lint.js";
 import { FsGuard, sha256 } from "./fsGuard.js";
@@ -139,7 +139,7 @@ function registerProposalTools(server: McpServer, guard: FsGuard): void {
         mode: target.exists ? "overwrite" : "create",
         rationale,
       });
-      return editorResult(guard, proposal.proposalId);
+      return openerResult(guard, proposal.proposalId);
     },
   );
 
@@ -175,8 +175,8 @@ function registerProposalTools(server: McpServer, guard: FsGuard): void {
         mode: target.exists ? "overwrite" : "create",
         rationale: note ?? "Opened for editing. Nothing changes until it is saved.",
       });
-      // Deliberately not editorResult: opening a file to read it yourself should
-      // not also dump it into the model's context.
+      // Deliberately not openerResult: opening a file to read it yourself should
+      // not report it back as a diff either.
       return summaryResult(guard, proposal.proposalId);
     },
   );
@@ -203,7 +203,7 @@ function registerProposalTools(server: McpServer, guard: FsGuard): void {
         mode: "delete",
         rationale,
       });
-      return editorResult(guard, proposal.proposalId);
+      return openerResult(guard, proposal.proposalId);
     },
   );
 }
@@ -227,7 +227,9 @@ function registerAppOnlyTools(server: McpServer, guard: FsGuard, options: ToolOp
       // proposing and the human actually looking at the editor.
       await refreshTarget(guard, getProposal(proposalId));
       updateProposal(proposalId, { attached: true });
-      return editorResult(guard, proposalId);
+      // This is also where the panel collects the state the opening tool did not
+      // return, so it is the one place the whole file legitimately goes over.
+      return editorResult(guard, proposalId, "Attached. The panel has the proposal.");
     },
   );
 
@@ -264,7 +266,7 @@ function registerAppOnlyTools(server: McpServer, guard: FsGuard, options: ToolOp
         });
       }
 
-      return editorResult(guard, proposalId);
+      return editorResult(guard, proposalId, "Updated.");
     },
   );
 
@@ -427,22 +429,33 @@ async function commit(guard: FsGuard, proposalId: string): Promise<CommitReceipt
 // Result shaping
 // ---------------------------------------------------------------------------
 
+/** How much diff the model is worth. The panel always shows all of it. */
+const MODEL_DIFF_LINE_BUDGET = 80;
+
 /**
- * The tool result carries two audiences. `structuredContent` is the View's
- * paint data. `content` is what the model reads — a summary and the diff, never
- * the whole file, because the model already knows what it proposed.
+ * A tool result has two readers that want opposite things.
+ *
+ * `content` is the model's half: a summary and a diff. `structuredContent` is
+ * the View's paint data — except hosts hand that to the model as well, so
+ * returning the whole `EditorState` billed the model for the file three times
+ * over on every proposal (`content`, `originalContent`, `baseline`) and made
+ * `open_file` leak the body it exists to keep out.
+ *
+ * So the opening tools return a handle and nothing else. The View redeems it
+ * for the full state through `editor_attach` — a call it already makes on
+ * mount, so this costs no round trip that was not already happening.
  */
-function editorResult(guard: FsGuard, proposalId: string): CallToolResult {
+function openerResult(guard: FsGuard, proposalId: string): CallToolResult {
   const state = buildEditorState(guard, getProposal(proposalId));
   return {
     content: [{ type: "text", text: describeState(state) }],
-    structuredContent: state as unknown as Record<string, unknown>,
+    structuredContent: handleFor(state) as unknown as Record<string, unknown>,
   };
 }
 
 /**
- * For opening a file the human wants to read. The panel gets everything; the
- * model gets told a review panel is open and how big the file is, and nothing else.
+ * For opening a file the human wants to read. Same handle; a text half that says
+ * a panel is open and how big the file is, and nothing about what is in it.
  */
 function summaryResult(guard: FsGuard, proposalId: string): CallToolResult {
   const state = buildEditorState(guard, getProposal(proposalId));
@@ -456,6 +469,29 @@ function summaryResult(guard: FsGuard, proposalId: string): CallToolResult {
 
   return {
     content: [{ type: "text", text }],
+    structuredContent: handleFor(state) as unknown as Record<string, unknown>,
+  };
+}
+
+function handleFor(state: EditorState): ProposalHandle {
+  const { proposal } = state;
+  return {
+    proposalId: proposal.proposalId,
+    display: proposal.target.display,
+    mode: proposal.mode,
+    ...(proposal.target.absolute ? {} : { refused: true }),
+  };
+}
+
+/**
+ * The panel's own tools. This side gets everything, because this side is what
+ * renders it, and a result the panel asked for does not go to the model. The
+ * text half is one line: nothing reads it.
+ */
+function editorResult(guard: FsGuard, proposalId: string, note: string): CallToolResult {
+  const state = buildEditorState(guard, getProposal(proposalId));
+  return {
+    content: [{ type: "text", text: note }],
     structuredContent: state as unknown as Record<string, unknown>,
   };
 }
@@ -489,13 +525,29 @@ function describeState(state: EditorState): string {
   }
 
   lines.push(
-    formatUnifiedDiff(state.diff, proposal.target.display),
+    diffForModel(state),
     ``,
     `The human reviews and edits this in the editor, then presses the button. ` +
       `You cannot write the file yourself — wait for them, and do not re-propose the same write.`,
   );
 
   return lines.join("\n");
+}
+
+/**
+ * The diff, capped. A new file diffs as one long run of additions the model just
+ * typed, so printing all of it back is the same content a second time — and the
+ * human is reading the panel, not this.
+ */
+function diffForModel(state: EditorState): string {
+  const full = formatUnifiedDiff(state.diff, state.proposal.target.display);
+  const lines = full.split("\n");
+  if (lines.length <= MODEL_DIFF_LINE_BUDGET) return full;
+
+  return [
+    ...lines.slice(0, MODEL_DIFF_LINE_BUDGET),
+    `… and ${lines.length - MODEL_DIFF_LINE_BUDGET} more diff lines, shown in full in the panel.`,
+  ].join("\n");
 }
 
 function describeReceipt(receipt: CommitReceipt): string {

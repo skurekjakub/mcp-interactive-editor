@@ -1,12 +1,7 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
+import { passageFromSelection, type Passage } from "../../../shared/passages.js";
 
-export interface Passage {
-  start: number;
-  end: number;
-  text: string;
-  startLine: number;
-  endLine: number;
-}
+export type { Passage };
 
 interface EditorProps {
   value: string;
@@ -45,22 +40,7 @@ export function Editor({ value, readOnly, onChange, onSelect }: EditorProps) {
     if (!onSelect) return;
     const area = areaRef.current;
     if (!area) return;
-
-    const { selectionStart, selectionEnd } = area;
-    if (selectionStart === selectionEnd) {
-      onSelect(null);
-      return;
-    }
-
-    const before = area.value.slice(0, selectionStart);
-    const selected = area.value.slice(selectionStart, selectionEnd);
-    onSelect({
-      start: selectionStart,
-      end: selectionEnd,
-      text: selected,
-      startLine: before.split("\n").length,
-      endLine: before.split("\n").length + selected.split("\n").length - 1,
-    });
+    onSelect(passageFromSelection(area.value, area.selectionStart, area.selectionEnd));
   }, [onSelect]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -113,11 +113,10 @@ async function main(): Promise<void> {
     { name: "interactive-editor", version: "0.1.0" },
     {
       instructions:
-        "Every file write in these directories goes through propose_write, which opens a review " +
-        "editor the human edits and approves. You cannot write files here yourself and you cannot " +
-        "approve your own proposal — the commit tool is not in your tool list. After proposing, " +
-        "stop and wait: the human may edit your content before it lands, and you will be told what " +
-        "actually landed.",
+        "propose_write opens an editable review panel: the human gets a live diff against disk, " +
+        "edits your draft in place, and saves. Reach for it when a write is worth a second pair " +
+        "of eyes, and open_file when they would rather write the change themselves. Passages they " +
+        "select in either pane come back to you as quotes with line numbers.",
     },
   );
 

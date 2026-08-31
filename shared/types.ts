@@ -62,6 +62,24 @@ export interface EditorState {
   dryRun: boolean;
 }
 
+/**
+ * What an editor-opening tool returns instead of an `EditorState`.
+ *
+ * `structuredContent` has two readers: the View paints from it, and the host
+ * also hands it to the model. So anything in here is paid for in context on
+ * every proposal — which is why this is a claim ticket and not the file. The
+ * View redeems it for the full state through `editor_attach`, a call it already
+ * makes on mount.
+ */
+export interface ProposalHandle {
+  proposalId: string;
+  /** Enough to name the file while the panel attaches. */
+  display: string;
+  mode: WriteMode;
+  /** Set when the path was refused, so the panel can say so before it attaches. */
+  refused?: boolean;
+}
+
 export type DiffLineKind = "equal" | "add" | "remove";
 
 export interface DiffLine {

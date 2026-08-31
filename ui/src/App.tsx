@@ -1,34 +1,57 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp, useHostStyleVariables } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { CommitReceipt, EditorState, Finding, Proposal } from "../../shared/types.js";
+import type {
+  CommitReceipt,
+  EditorState,
+  Finding,
+  Proposal,
+  ProposalHandle,
+} from "../../shared/types.js";
 import { diffLines } from "../../shared/diff.js";
 import { hasBlockers, lintProposal } from "../../shared/lint.js";
+import {
+  attachPassage,
+  describePassages,
+  quotePassages,
+  type Passage,
+} from "../../shared/passages.js";
 import { IS_PREVIEW, hostBridge, previewBridge, previewState, type Bridge } from "./bridge.js";
-import { Editor, type Passage } from "./components/Editor.js";
+import { Editor } from "./components/Editor.js";
 import { DiffPane } from "./components/DiffPane.js";
 import { Findings } from "./components/Findings.js";
 import { SelectionBar } from "./components/SelectionBar.js";
 
 type View = "split" | "edit" | "diff";
 
+/** The openers send a handle, the panel's own calls send full state. Accept either. */
+type OpeningPayload = Partial<ProposalHandle> & Partial<EditorState>;
+
 const PUSH_DEBOUNCE_MS = 500;
 
 export function App() {
   const [state, setState] = useState<EditorState | null>(null);
+  const [handle, setHandle] = useState<ProposalHandle | null>(null);
   const [content, setContent] = useState("");
   const [ack, setAck] = useState(false);
   const [view, setView] = useState<View>("split");
   const [receipt, setReceipt] = useState<CommitReceipt | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [passage, setPassage] = useState<Passage | null>(null);
+  const [pending, setPending] = useState<Passage | null>(null);
+  const [passages, setPassages] = useState<Passage[]>([]);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<string | null>(null);
+
+  // Only the first state to arrive fills the edit buffer. A later one must not:
+  // by then the human may have typed, and their draft outranks a re-attach.
+  const adopted = useRef(false);
 
   const adopt = useCallback((next: EditorState | undefined) => {
     if (!next?.proposal) return;
     setState(next);
+    if (adopted.current) return;
+    adopted.current = true;
     setContent(next.proposal.content);
     setAck(next.proposal.destructiveAcknowledged);
   }, []);
@@ -37,10 +60,15 @@ export function App() {
     appInfo: { name: "interactive-editor", version: "0.1.0" },
     capabilities: {},
     onAppCreated: (instance) => {
-      // The host hands us the opening tool's result, and that result is the
-      // whole proposal — so there is nothing to fetch before the first paint.
+      // The host hands us the opening tool's result, and that result is a claim
+      // ticket rather than the proposal — `structuredContent` goes to the model
+      // as well as to us, and the file has no business being in its context
+      // three times over. The bytes arrive on attach, below.
       instance.ontoolresult = (result) => {
-        adopt(result.structuredContent as unknown as EditorState | undefined);
+        const payload = result.structuredContent as unknown as OpeningPayload | undefined;
+        if (!payload) return;
+        if (payload.proposal) adopt(payload as EditorState);
+        else if (payload.proposalId) setHandle(payload as ProposalHandle);
       };
     },
   });
@@ -58,11 +86,12 @@ export function App() {
     if (IS_PREVIEW) adopt(previewState());
   }, [adopt]);
 
-  const proposalId = state?.proposal.proposalId;
+  const proposalId = state?.proposal.proposalId ?? handle?.proposalId;
   const ready = IS_PREVIEW || isConnected;
 
   // Attaching is what unlocks the commit tool server-side. Until this lands,
-  // nothing can write — including from a host that ignores tool visibility.
+  // nothing can write — including from a host that ignores tool visibility. It
+  // is also how the panel gets the file the opening result left out.
   useEffect(() => {
     if (!bridge || !ready || !proposalId) return;
     let cancelled = false;
@@ -70,7 +99,7 @@ export function App() {
       .callTool("editor_attach", { proposalId })
       .then((result) => {
         const next = result.structuredContent as unknown as EditorState | undefined;
-        if (!cancelled && next?.proposal) setState(next);
+        if (!cancelled) adopt(next);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setFailure(messageOf(cause));
@@ -78,7 +107,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [bridge, ready, proposalId]);
+  }, [bridge, ready, proposalId, adopt]);
 
   /*
    * Findings and the diff are computed here, on every keystroke, from the same
@@ -124,33 +153,37 @@ export function App() {
     if (finding.fix) setContent(finding.fix.content);
   }, []);
 
+  const pin = useCallback((next: Passage) => {
+    setPassages((current) => attachPassage(current, next));
+    setPending(null);
+  }, []);
+
+  const unpin = useCallback((id: string) => {
+    setPassages((current) => current.filter((p) => p.id !== id));
+  }, []);
+
   /*
-   * Hand a selected passage to the chat as though the human had typed it. This
-   * is `ui/message`, which starts a normal turn — so the answer arrives in the
-   * conversation, next to the panel, rather than inside it. The quote carries
-   * the path and line numbers because a passage without them is just a snippet.
+   * Hand the selected passages to the chat as though the human had typed them.
+   * This is `ui/message`, which starts a normal turn — so the answer arrives in
+   * the conversation, next to the panel, rather than inside it. Each quote
+   * carries its line numbers, because a passage without them is just a snippet.
    */
-  const sendPassage = useCallback(
-    async (selected: Passage, note: string) => {
+  const sendPassages = useCallback(
+    async (note: string) => {
       if (!bridge || !state) return;
+      // Whatever is still highlighted counts as selected, so a single region
+      // needs no trip through the + button before it can be sent.
+      const outgoing = pending ? attachPassage(passages, pending) : passages;
+      if (outgoing.length === 0) return;
+
       setSending(true);
       setFailure(null);
       try {
-        const range =
-          selected.startLine === selected.endLine
-            ? `line ${selected.startLine}`
-            : `lines ${selected.startLine}–${selected.endLine}`;
+        await bridge.sendMessage(quotePassages(state.proposal.target.display, outgoing, note));
 
-        await bridge.sendMessage(
-          `From the draft open in the interactive editor — \`${state.proposal.target.display}\`, ${range}:\n\n` +
-            "```\n" +
-            selected.text +
-            "\n```" +
-            (note ? `\n\n${note}` : ""),
-        );
-
-        setPassage(null);
-        setSent(`Sent ${range} to Claude.`);
+        setPending(null);
+        setPassages([]);
+        setSent(`Sent ${describePassages(outgoing)} to Claude.`);
         window.setTimeout(() => setSent(null), 4000);
       } catch (cause) {
         setFailure(messageOf(cause));
@@ -158,7 +191,7 @@ export function App() {
         setSending(false);
       }
     },
-    [bridge, state],
+    [bridge, state, passages, pending],
   );
 
   const commit = useCallback(async () => {
@@ -231,7 +264,8 @@ export function App() {
   if (error && !IS_PREVIEW) {
     return <div className="status status-error">Could not reach the host: {error.message}</div>;
   }
-  if (!state || !local) return <div className="status">Opening the editor…</div>;
+  if (!state || !local)
+    return <div className="status">Opening {handle?.display ?? "the editor"}…</div>;
   if (receipt) return <Receipt receipt={receipt} />;
 
   const { proposal, findings, hunks, stats } = local;
@@ -273,7 +307,7 @@ export function App() {
               <ViewToggle view={view} onChange={setView} />
             </header>
             <div className="pane-scroll">
-              <Editor value={content} onChange={setContent} onSelect={setPassage} />
+              <Editor value={content} onChange={setContent} onSelect={setPending} />
             </div>
           </section>
         ) : null}
@@ -293,19 +327,25 @@ export function App() {
               )}
             </header>
             <div className="pane-scroll">
-              <DiffPane hunks={hunks} isNewFile={!proposal.target.exists} />
+              <DiffPane hunks={hunks} isNewFile={!proposal.target.exists} onSelect={setPending} />
             </div>
           </section>
         ) : null}
       </div>
 
-      {passage && showEditor ? (
+      {pending || passages.length > 0 ? (
         <SelectionBar
-          passage={passage}
+          pending={pending}
+          passages={passages}
           path={proposal.target.display}
           sending={sending}
-          onSend={sendPassage}
-          onDismiss={() => setPassage(null)}
+          onAttach={pin}
+          onRemove={unpin}
+          onSend={sendPassages}
+          onDismiss={() => {
+            setPending(null);
+            setPassages([]);
+          }}
         />
       ) : sent ? (
         <div className="sent-note">{sent}</div>
