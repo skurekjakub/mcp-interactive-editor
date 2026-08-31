@@ -3,6 +3,25 @@
 Read `CONTRIBUTING.md` for setup and what a change needs. This file is the
 operational stuff that is easy to get wrong and expensive to debug.
 
+## Before you finish a session, ask what should outlive it
+
+At the end of substantial work, judge whether anything learned should be written
+down, and say so rather than letting it evaporate:
+
+- **A repeatable procedure** — something a future session would otherwise have to
+  work out again from scratch → a skill under `.claude/skills/`. `cut-release`,
+  `multi-agent-audit` and `vacuous-test-hunt` are there already; extend one
+  before adding a fourth that overlaps it.
+- **A constraint or invariant this file does not yet state** → a section here.
+- **A rule the build could enforce instead of a document** → prefer that. A check
+  in `npm run verify` does not go stale; a paragraph does.
+
+Nothing to record is a legitimate answer, and the common one for a small change.
+When it is a close call — or the knowledge is about the user's preferences rather
+than the code — ask rather than deciding alone. Do not write a skill for
+something done once, and do not restate what the code, the tests or `git log`
+already say.
+
 ## Comments are contracts, and the build enforces it
 
 `docs/comment-policy.md` is the rule, and `npm run lint:comments` is the check.
