@@ -3,7 +3,6 @@
 [![ci](https://github.com/skurekjakub/mcp-interactive-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/skurekjakub/mcp-interactive-editor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![MCP App](https://img.shields.io/badge/MCP-App-6E56CF)](https://apps.extensions.modelcontextprotocol.io/)
-[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?logo=visualstudiocode&logoColor=white)](vscode:mcp/install?name=interactive-editor&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mcp-interactive-editor%22%2C%22--root%22%2C%22%24%7BworkspaceFolder%7D%22%5D%7D)
 
 **An interactive editor in front of every file write.**
 
@@ -112,7 +111,7 @@ npm install && npm run pack
     "interactive-editor": {
       "command": "node",
       "args": [
-        "C:\\path\\to\\mcp-interactive-editor\\dist\\src\\server.js",
+        "C:\\path\\to\\mcp-interactive-editor\\bundle\\server\\index.js",
         "--root",
         "C:\\path\\to\\your-project"
       ]
@@ -128,25 +127,33 @@ reopen; closing the window is not quitting.
 
 ### VS Code (GitHub Copilot)
 
-Click the badge at the top, or add `.vscode/mcp.json` to your workspace:
+Clone it anywhere. `bundle/` is committed, so there is nothing to install or
+build:
+
+```bash
+git clone https://github.com/skurekjakub/mcp-interactive-editor.git
+```
+
+Then add `.vscode/mcp.json` to your workspace, pointing at the clone:
 
 ```json
 {
   "servers": {
     "interactive-editor": {
       "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "mcp-interactive-editor", "--root", "${workspaceFolder}"]
+      "command": "node",
+      "args": [
+        "/absolute/path/to/mcp-interactive-editor/bundle/server/index.js",
+        "--root",
+        "${workspaceFolder}"
+      ]
     }
   }
 }
 ```
 
-Or from a terminal:
-
-```bash
-code --add-mcp '{"name":"interactive-editor","command":"npx","args":["-y","mcp-interactive-editor","--root","."]}'
-```
+`${workspaceFolder}` is expanded by VS Code, so the root follows whatever project
+you have open. The path to the clone has to be absolute.
 
 ### Claude Code — plugin marketplace
 

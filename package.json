@@ -3,9 +3,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "An MCP App that opens an interactive editor for every file write a model proposes. You edit it by hand, and nothing reaches disk until you say so.",
-  "bin": {
-    "mcp-interactive-editor": "dist/src/server.js"
-  },
   "files": [
     "dist"
   ],
@@ -33,6 +30,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -69,5 +67,6 @@
   "homepage": "https://github.com/skurekjakub/mcp-interactive-editor#readme",
   "bugs": {
     "url": "https://github.com/skurekjakub/mcp-interactive-editor/issues"
-  }
+  },
+  "private": true
 }
