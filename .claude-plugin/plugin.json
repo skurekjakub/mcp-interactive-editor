@@ -1,0 +1,20 @@
+{
+  "name": "interactive-editor",
+  "displayName": "Interactive Editor",
+  "version": "0.1.0",
+  "description": "An interactive editor in front of every file write. The model proposes; you edit the proposal by hand and decide whether it lands.",
+  "author": {
+    "name": "skurekjakub",
+    "url": "https://github.com/skurekjakub"
+  },
+  "homepage": "https://github.com/skurekjakub/mcp-interactive-editor#readme",
+  "repository": "https://github.com/skurekjakub/mcp-interactive-editor",
+  "license": "MIT",
+  "keywords": ["mcp", "filesystem", "review", "diff", "human-in-the-loop"],
+  "mcpServers": {
+    "interactive-editor": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bundle/server/index.js", "--root-from-cwd"]
+    }
+  }
+}

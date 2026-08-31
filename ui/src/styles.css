@@ -1,0 +1,702 @@
+/*
+ * The editor borrows its look from lockout/tagout — the yellow tag you clamp onto
+ * a breaker so nobody energises it while a person is still inside the machine.
+ * That is exactly what this View is: a hold placed on a file write, with the
+ * name of whoever gets to remove it.
+ *
+ * Everything structural themes from the host's style variables so the editor sits
+ * inside Claude Desktop rather than on top of it. The hazard palette is the one
+ * thing that stays ours, and it appears in exactly two places: the tag bar and
+ * the leading edge of the commit button.
+ *
+ * No @font-face, no imports: the host serves this into a sandbox with
+ * connect/resource domains set to none, so every byte here is already local.
+ */
+
+:root {
+  --paper: var(--color-background-primary, #ffffff);
+  --paper-raised: var(--color-background-secondary, #f6f6f4);
+  --paper-sunk: var(--color-background-tertiary, #ecebe7);
+  --ink: var(--color-text-primary, #1a1a18);
+  --ink-dim: var(--color-text-secondary, #5f5f58);
+  --ink-faint: var(--color-text-tertiary, #8a8a80);
+  --rule: var(--color-border-primary, #dededa);
+  --rule-soft: var(--color-border-secondary, #ebebe7);
+  --ring: var(--color-ring-primary, #3b7cc4);
+
+  --mono: var(--font-mono, ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace);
+  --sans: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+
+  --radius: var(--border-radius-md, 6px);
+  --radius-sm: var(--border-radius-sm, 4px);
+
+  /* The hazard palette. Ours, not the host's. */
+  --lock: #e0ac00;
+  --lock-ink: #3a2c00;
+  --cut: #c2563f;
+  --cut-wash: rgba(194, 86, 63, 0.09);
+  --add: #3f8f72;
+  --add-wash: rgba(63, 143, 114, 0.1);
+  --danger: #c0392b;
+
+  --line-height: 1.55;
+  --pane-min: 240px;
+  --pane-max: 420px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: var(--color-background-primary, #1c1c1a);
+    --paper-raised: var(--color-background-secondary, #242422);
+    --paper-sunk: var(--color-background-tertiary, #151513);
+    --ink: var(--color-text-primary, #ecebe6);
+    --ink-dim: var(--color-text-secondary, #a3a29a);
+    --ink-faint: var(--color-text-tertiary, #74736c);
+    --rule: var(--color-border-primary, #3a3a36);
+    --rule-soft: var(--color-border-secondary, #2c2c29);
+    --lock: #f0bd1a;
+    --cut: #e0715a;
+    --cut-wash: rgba(224, 113, 90, 0.13);
+    --add: #5fb894;
+    --add-wash: rgba(95, 184, 148, 0.13);
+    --danger: #e4685a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: var(--line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+/* -------------------------------------------------------------------------
+   The tag
+   ------------------------------------------------------------------------- */
+
+.tag {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 0 14px;
+  padding: 13px 16px 14px;
+  background: var(--paper-raised);
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+}
+
+/* The yellow bar. One of two places the hazard palette is allowed to appear. */
+.tag::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--lock);
+}
+
+.tag[data-state="committed"]::before {
+  background: var(--add);
+}
+
+.tag[data-state="refused"]::before {
+  background: var(--danger);
+}
+
+.tag-state {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lock-ink);
+  background: var(--lock);
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.tag[data-state="committed"] .tag-state {
+  background: var(--add);
+  color: var(--paper);
+}
+
+.tag[data-state="refused"] .tag-state {
+  background: var(--danger);
+  color: #fff;
+}
+
+.tag-body {
+  min-width: 0;
+}
+
+.tag-path {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.tag-mode {
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+
+.tag-rationale {
+  margin: 4px 0 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+  max-width: 68ch;
+}
+
+.tag-meta {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.count-add {
+  color: var(--add);
+}
+.count-cut {
+  color: var(--cut);
+}
+.count-flat {
+  color: var(--ink-faint);
+}
+
+/* -------------------------------------------------------------------------
+   Panes
+   ------------------------------------------------------------------------- */
+
+.panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--rule);
+  min-width: 0;
+}
+
+.panes[data-single="true"] {
+  grid-template-columns: 1fr;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: var(--pane-min);
+  max-height: var(--pane-max);
+}
+
+.pane + .pane {
+  border-left: 1px solid var(--rule);
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--paper);
+}
+
+.pane-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.pane-note {
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+}
+
+.pane-scroll {
+  flex: 1;
+  overflow: auto;
+  background: var(--paper-sunk);
+}
+
+/* -------------------------------------------------------------------------
+   Editor
+   ------------------------------------------------------------------------- */
+
+.editor {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: var(--line-height);
+  min-height: 100%;
+}
+
+.gutter {
+  padding: 8px 8px 8px 12px;
+  text-align: right;
+  color: var(--ink-faint);
+  user-select: none;
+  border-right: 1px solid var(--rule-soft);
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor textarea {
+  font: inherit;
+  line-height: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  resize: none;
+  padding: 8px 12px;
+  width: 100%;
+  outline: none;
+  overflow: hidden;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.editor textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+/* -------------------------------------------------------------------------
+   Diff
+   ------------------------------------------------------------------------- */
+
+.diff {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: var(--line-height);
+  padding-bottom: 8px;
+}
+
+.hunk-head {
+  padding: 6px 12px 5px;
+  color: var(--ink-faint);
+  background: var(--paper-raised);
+  border-block: 1px solid var(--rule-soft);
+  position: sticky;
+  top: 0;
+  font-size: 11px;
+}
+
+.hunk:first-child .hunk-head {
+  border-top: 0;
+}
+
+.dline {
+  display: grid;
+  grid-template-columns: 4ch 1fr;
+  gap: 0 10px;
+  padding-right: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-left: 3px solid transparent;
+}
+
+.dline-no {
+  padding-left: 9px;
+  color: var(--ink-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+/* Removals read as struck-through ink rather than a block of red wash: the eye
+   should land on what is being taken away, not on a highlighter. */
+.dline[data-kind="remove"] {
+  border-left-color: var(--cut);
+  background: var(--cut-wash);
+  color: var(--cut);
+}
+
+.dline[data-kind="add"] {
+  border-left-color: var(--add);
+  background: var(--add-wash);
+}
+
+.dline[data-kind="equal"] {
+  color: var(--ink-dim);
+}
+
+.diff-empty {
+  padding: 24px 16px;
+  color: var(--ink-faint);
+  text-align: center;
+  font-family: var(--sans);
+}
+
+/* -------------------------------------------------------------------------
+   Findings
+   ------------------------------------------------------------------------- */
+
+.findings {
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.finding {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.finding:last-child {
+  border-bottom: 0;
+}
+
+.finding-sev {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding-top: 1px;
+}
+
+.finding[data-sev="blocker"] .finding-sev {
+  color: var(--danger);
+}
+.finding[data-sev="warning"] .finding-sev {
+  color: var(--lock);
+}
+.finding[data-sev="info"] .finding-sev {
+  color: var(--ink-faint);
+}
+
+.finding-msg {
+  min-width: 0;
+}
+
+.finding-detail {
+  display: block;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+/* -------------------------------------------------------------------------
+   Controls
+   ------------------------------------------------------------------------- */
+
+button {
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--paper-raised);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-quiet {
+  border-color: transparent;
+  color: var(--ink-dim);
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segmented button {
+  border: 0;
+  background: var(--paper);
+  color: var(--ink-dim);
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--paper-sunk);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--rule);
+}
+
+/* -------------------------------------------------------------------------
+   The editor itself
+   ------------------------------------------------------------------------- */
+
+.threshold {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--paper-raised);
+}
+
+.ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 260px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 7px 10px;
+  border: 1px solid var(--lock);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--lock) 9%, transparent);
+}
+
+.ack input {
+  margin: 2px 0 0;
+  accent-color: var(--lock);
+  flex: none;
+}
+
+.threshold-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.blocked-why {
+  font-size: 12px;
+  color: var(--danger);
+  flex: 1 1 240px;
+}
+
+/* The second and last appearance of the hazard palette. Striped while it is
+   inert, solid once the write is actually allowed through. */
+.commit {
+  position: relative;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 9px 16px 9px 22px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--sans);
+  color: var(--lock-ink);
+  background: var(--lock);
+  overflow: hidden;
+}
+
+.commit::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 10px;
+  background: repeating-linear-gradient(135deg, var(--lock-ink) 0 4px, transparent 4px 8px);
+  opacity: 0.85;
+}
+
+.commit:disabled {
+  background: var(--paper-sunk);
+  color: var(--ink-faint);
+  border: 1px solid var(--rule);
+  cursor: not-allowed;
+}
+
+.commit:disabled::before {
+  background: repeating-linear-gradient(135deg, var(--ink-faint) 0 4px, transparent 4px 8px);
+  opacity: 0.4;
+}
+
+.commit:not(:disabled):hover {
+  filter: brightness(1.06);
+}
+
+.commit-danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.commit-danger::before {
+  background: repeating-linear-gradient(135deg, #ffffff 0 4px, transparent 4px 8px);
+  opacity: 0.5;
+}
+
+/* -------------------------------------------------------------------------
+   Receipt
+   ------------------------------------------------------------------------- */
+
+.receipt {
+  padding: 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.receipt-line {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-dim);
+  display: flex;
+  gap: 10px;
+}
+
+.receipt-key {
+  color: var(--ink-faint);
+  min-width: 8ch;
+}
+
+.receipt-note {
+  font-size: 12px;
+  color: var(--ink-dim);
+  border-left: 3px solid var(--lock);
+  padding-left: 10px;
+  max-width: 70ch;
+}
+
+.status {
+  padding: 28px 18px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+.status-error {
+  color: var(--danger);
+  text-align: left;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 720px) {
+  .panes {
+    grid-template-columns: 1fr;
+  }
+  .pane + .pane {
+    border-left: 0;
+    border-top: 1px solid var(--rule);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* -------------------------------------------------------------------------
+   Selection to chat
+   ------------------------------------------------------------------------- */
+
+.selection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.selection-quote {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  border-left: 3px solid var(--lock);
+  padding-left: 10px;
+}
+
+.selection-range {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.selection-excerpt {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.selection-ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selection-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+
+.selection-input::placeholder {
+  color: var(--ink-faint);
+}
+
+.selection-input:disabled {
+  opacity: 0.6;
+}
+
+.sent-note {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  font-size: 12px;
+  color: var(--ink-dim);
+  border-left: 3px solid var(--add);
+}

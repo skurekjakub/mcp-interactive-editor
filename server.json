@@ -1,0 +1,40 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.skurekjakub/mcp-interactive-editor",
+  "description": "An interactive editor in front of every file write. The model proposes; the human edits the proposal by hand and decides whether it lands.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/skurekjakub/mcp-interactive-editor",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/skurekjakub/mcp-interactive-editor#readme",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "mcp-interactive-editor",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--root",
+          "description": "A directory the editor may write inside. Repeat for more than one. Required.",
+          "isRequired": true,
+          "isRepeated": true,
+          "format": "filepath"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "INTERACTIVE_EDITOR_DRY_RUN",
+          "description": "Set to true to run the whole flow without touching disk.",
+          "isRequired": false,
+          "default": "false"
+        }
+      ]
+    }
+  ]
+}

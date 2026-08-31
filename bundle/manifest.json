@@ -1,0 +1,66 @@
+{
+  "manifest_version": "0.3",
+  "name": "mcp-interactive-editor",
+  "display_name": "Interactive Editor",
+  "version": "0.1.0",
+  "description": "An MCP App that opens an interactive editor for every file write a model proposes. You edit it by hand, and nothing reaches disk until you say so.",
+  "long_description": "Claude proposes a file write. A panel opens with the proposed content in an editor and a live diff against what is on disk. You edit it by hand and press the button; nothing reaches the filesystem until you do. Claude cannot approve its own write — the commit tool is not in its tool list.",
+  "author": {
+    "name": "skurekjakub"
+  },
+  "homepage": "https://github.com/skurekjakub/mcp-interactive-editor#readme",
+  "documentation": "https://github.com/skurekjakub/mcp-interactive-editor#readme",
+  "support": "https://github.com/skurekjakub/mcp-interactive-editor/issues",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "mcp-app",
+    "mcp-server",
+    "model-context-protocol",
+    "claude",
+    "filesystem",
+    "code-review",
+    "diff",
+    "human-in-the-loop"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js",
+        "${user_config.roots}"
+      ],
+      "env": {
+        "INTERACTIVE_EDITOR_DRY_RUN": "${user_config.dry_run}"
+      }
+    }
+  },
+  "user_config": {
+    "roots": {
+      "type": "directory",
+      "title": "Writable folders",
+      "description": "Folders the editor may write inside. Anything outside these is refused, symlinks included.",
+      "multiple": true,
+      "required": true
+    },
+    "dry_run": {
+      "type": "boolean",
+      "title": "Dry run",
+      "description": "Run the whole flow but never touch disk. Good for a first pass on a real project.",
+      "required": false,
+      "default": false
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=20.10.0"
+    }
+  }
+}

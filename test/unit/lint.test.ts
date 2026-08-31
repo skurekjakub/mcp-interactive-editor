@@ -1,0 +1,215 @@
+import { describe, expect, it } from "vitest";
+import { diffLines } from "../../shared/diff.js";
+import { DESTRUCTIVE_DELETION_RATIO, hasBlockers, lintProposal } from "../../shared/lint.js";
+import type { Proposal, WriteMode } from "../../shared/types.js";
+
+function proposal(overrides: Partial<Proposal> = {}): Proposal {
+  const baseline = overrides.baseline ?? "";
+  const content = overrides.content ?? "";
+  const mode: WriteMode = overrides.mode ?? (baseline === "" ? "create" : "overwrite");
+
+  return {
+    proposalId: "test",
+    mode,
+    content,
+    originalContent: content,
+    baseline,
+    attached: true,
+    destructiveAcknowledged: false,
+    ...overrides,
+    // Built last, and merged rather than replaced, so a test can override one
+    // target field without silently blanking the rest of it.
+    target: {
+      requested: "src/thing.ts",
+      absolute: "/root/src/thing.ts",
+      display: "src/thing.ts",
+      root: "/root",
+      exists: baseline !== "",
+      ...(baseline !== ""
+        ? {
+            onDisk: {
+              bytes: baseline.length,
+              lines: baseline.split("\n").length,
+              sha256: "x",
+              mtimeMs: 0,
+            },
+          }
+        : {}),
+      ...overrides.target,
+    },
+  };
+}
+
+/** Lint the way the server does: diff first, then check against those stats. */
+function lint(p: Proposal) {
+  const after = p.mode === "delete" ? "" : p.content;
+  return lintProposal(p, diffLines(p.baseline, after).stats);
+}
+
+const ids = (p: Proposal) => lint(p).map((f) => f.id);
+
+describe("path checks", () => {
+  it("blocks a target that resolved outside every root", () => {
+    const findings = lint(proposal({ target: { absolute: null } as never, content: "x\n" }));
+    expect(findings[0]).toMatchObject({ id: "path-unresolved", severity: "blocker" });
+  });
+
+  it("blocks creating a file that already exists", () => {
+    const findings = lint(
+      proposal({ mode: "create", baseline: "already here\n", content: "new\n" }),
+    );
+    expect(findings.find((f) => f.id === "create-exists")?.severity).toBe("blocker");
+  });
+
+  it("warns, but does not block, when an overwrite target is missing", () => {
+    const findings = lint(proposal({ mode: "overwrite", baseline: "", content: "new\n" }));
+    expect(findings.find((f) => f.id === "overwrite-missing")?.severity).toBe("warning");
+    expect(hasBlockers(findings)).toBe(false);
+  });
+
+  it("notes that a traversal path was normalised", () => {
+    const findings = lint(
+      proposal({ content: "x\n", target: { requested: "src/../src/thing.ts" } as never }),
+    );
+    expect(findings.find((f) => f.id === "path-traversal")?.severity).toBe("info");
+  });
+});
+
+describe("destructive changes", () => {
+  const original = `${Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n")}\n`;
+
+  it(`blocks removing more than ${DESTRUCTIVE_DELETION_RATIO * 100}% of a file`, () => {
+    const findings = lint(proposal({ baseline: original, content: "line 0\n" }));
+    const finding = findings.find((f) => f.id === "large-deletion");
+
+    expect(finding?.severity).toBe("blocker");
+    expect(finding?.message).toMatch(/removes 99 of 101 lines \(98%\)/);
+    expect(hasBlockers(findings)).toBe(true);
+  });
+
+  it("stays quiet on a small file, where the ratio means nothing", () => {
+    // A one-line file whose line changes is a 50% deletion on paper and an
+    // ordinary edit in practice. Nagging here would train the reflex away.
+    const findings = lint(proposal({ baseline: "before\n", content: "after\n" }));
+    expect(hasBlockers(findings)).toBe(false);
+    expect(ids(proposal({ baseline: "before\n", content: "after\n" }))).not.toContain(
+      "large-deletion",
+    );
+  });
+
+  it("still blocks once the file is big enough for the share to mean something", () => {
+    const twelve = `${Array.from({ length: 12 }, (_, i) => `l${i}`).join("\n")}\n`;
+    const findings = lint(proposal({ baseline: twelve, content: "l0\nl1\n" }));
+    expect(findings.find((f) => f.id === "large-deletion")?.severity).toBe("blocker");
+  });
+
+  it("downgrades to a note once it is acknowledged", () => {
+    const findings = lint(
+      proposal({ baseline: original, content: "line 0\n", destructiveAcknowledged: true }),
+    );
+    expect(findings.find((f) => f.id === "large-deletion")?.severity).toBe("info");
+    expect(hasBlockers(findings)).toBe(false);
+  });
+
+  it("leaves a small edit alone", () => {
+    const findings = lint(
+      proposal({ baseline: original, content: original.replace("line 4", "line four") }),
+    );
+    expect(hasBlockers(findings)).toBe(false);
+    expect(ids(proposal({ baseline: original, content: original }))).not.toContain(
+      "large-deletion",
+    );
+  });
+
+  it("blocks emptying a file", () => {
+    const findings = lint(proposal({ baseline: "something\n", content: "   \n" }));
+    expect(findings.find((f) => f.id === "emptied")?.severity).toBe("blocker");
+  });
+
+  it("blocks a deletion until acknowledged", () => {
+    const p = proposal({ mode: "delete", baseline: "goodbye\n", content: "" });
+    expect(lint(p).find((f) => f.id === "delete")?.severity).toBe("blocker");
+    expect(
+      lint({ ...p, destructiveAcknowledged: true }).find((f) => f.id === "delete")?.severity,
+    ).toBe("info");
+  });
+
+  it("warns when the diff had to fall back to a wholesale replacement", () => {
+    const big = Array.from({ length: 2000 }, (_, i) => `old ${i}`).join("\n");
+    const other = Array.from({ length: 2000 }, (_, i) => `new ${i}`).join("\n");
+    const findings = lint(
+      proposal({ baseline: big, content: other, destructiveAcknowledged: true }),
+    );
+
+    expect(findings.find((f) => f.id === "diff-truncated")?.severity).toBe("warning");
+  });
+});
+
+describe("content hygiene", () => {
+  it("offers to add a missing final newline", () => {
+    const finding = lint(proposal({ content: "no newline" })).find(
+      (f) => f.id === "no-final-newline",
+    );
+    expect(finding?.fix?.content).toBe("no newline\n");
+  });
+
+  it("does not complain about an empty file having no newline", () => {
+    expect(ids(proposal({ content: "" }))).not.toContain("no-final-newline");
+  });
+
+  it("offers to normalise mixed line endings", () => {
+    const finding = lint(proposal({ content: "a\r\nb\nc\n" })).find((f) => f.id === "mixed-eol");
+    expect(finding?.severity).toBe("warning");
+    expect(finding?.fix?.content).toBe("a\nb\nc\n");
+  });
+
+  it("flags CRLF content going into an LF file", () => {
+    const finding = lint(proposal({ baseline: "a\nb\n", content: "a\r\nb\r\n" })).find(
+      (f) => f.id === "eol-mismatch",
+    );
+    expect(finding?.fix?.content).toBe("a\nb\n");
+  });
+
+  it("offers to strip trailing whitespace", () => {
+    const finding = lint(proposal({ content: "a   \nb\t\n" })).find(
+      (f) => f.id === "trailing-whitespace",
+    );
+    expect(finding?.fix?.content).toBe("a\nb\n");
+  });
+
+  it("notices an indentation style that disagrees with the file", () => {
+    const tabbed = "function a() {\n\treturn 1;\n}\n\tif (x) {\n\t\ty();\n\t}\n";
+    const spaced = "function a() {\n  return 1;\n}\n  if (x) {\n    y();\n  }\n";
+    const finding = lint(proposal({ baseline: tabbed, content: spaced })).find(
+      (f) => f.id === "indent-mismatch",
+    );
+
+    expect(finding?.message).toContain("tabs");
+    expect(finding?.message).toContain("spaces");
+  });
+
+  it("blocks null bytes outright", () => {
+    const findings = lint(proposal({ content: `binary${String.fromCharCode(0)}payload` }));
+    expect(findings.find((f) => f.id === "binary-content")?.severity).toBe("blocker");
+  });
+
+  it("skips hygiene checks entirely for a deletion", () => {
+    const findings = ids(proposal({ mode: "delete", baseline: "x\n", content: "" }));
+    expect(findings).not.toContain("no-final-newline");
+    expect(findings).not.toContain("emptied");
+  });
+});
+
+describe("ordering", () => {
+  it("puts blockers first so the reason the button is dead is the first thing read", () => {
+    const findings = lint(
+      proposal({
+        baseline: `${Array.from({ length: 50 }, (_, i) => `l${i}`).join("\n")}\n`,
+        content: "l0",
+      }),
+    );
+
+    expect(findings[0].severity).toBe("blocker");
+    expect(findings.at(-1)?.severity).toBe("info");
+  });
+});

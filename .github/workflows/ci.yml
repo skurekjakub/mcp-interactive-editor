@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The guard does path resolution, symlink checks and atomic renames, so
+        # it earns a run on every platform it claims to support.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+  bundle:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run bundle
+
+      - name: Fail if the committed bundle is stale
+        # bundle/ ships to Claude Code plugin users straight from the repo, so a
+        # bundle that disagrees with src/ means they install yesterday's server.
+        run: git diff --exit-code -- bundle/ || (echo "::error::bundle/ is out of date — run 'npm run bundle' and commit it" && exit 1)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle
+          path: bundle/

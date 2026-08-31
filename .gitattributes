@@ -1,0 +1,7 @@
+# LF everywhere, checkout included. A project that blocks a write for mixing
+# CRLF and LF should not be shipping mixed line endings of its own, and the CI
+# matrix runs on Windows.
+* text=auto eol=lf
+
+*.png binary
+*.mcpb binary

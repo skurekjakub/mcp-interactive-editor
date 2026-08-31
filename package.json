@@ -1,0 +1,73 @@
+{
+  "name": "mcp-interactive-editor",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "An MCP App that opens an interactive editor for every file write a model proposes. You edit it by hand, and nothing reaches disk until you say so.",
+  "bin": {
+    "mcp-interactive-editor": "dist/src/server.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run build:ui && npm run build:server",
+    "build:ui": "vite build",
+    "build:server": "tsc -p tsconfig.json",
+    "bundle": "node scripts/bundle.mjs",
+    "pack": "npm run bundle && mcpb pack bundle dist/mcp-interactive-editor.mcpb",
+    "preview": "vite --port 5178",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run test/unit",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p ui/tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "npm run typecheck && npm run format:check && npm test",
+    "start": "node dist/src/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.5",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.25.12",
+    "prettier": "^3.9.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.1.0",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "license": "MIT",
+  "author": "skurekjakub",
+  "keywords": [
+    "mcp",
+    "mcp-app",
+    "mcp-server",
+    "model-context-protocol",
+    "claude",
+    "filesystem",
+    "code-review",
+    "diff",
+    "human-in-the-loop"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skurekjakub/mcp-interactive-editor.git"
+  },
+  "homepage": "https://github.com/skurekjakub/mcp-interactive-editor#readme",
+  "bugs": {
+    "url": "https://github.com/skurekjakub/mcp-interactive-editor/issues"
+  }
+}
