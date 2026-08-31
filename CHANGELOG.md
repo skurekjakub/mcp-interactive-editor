@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-31
+
+### Added
+
+- **A Streamable HTTP transport, behind `--http`.** A browser cannot spawn a
+  process, so an in-browser host or inspector could never reach this server —
+  the only way to see the panel rendered by anything but the preview fixture was
+  to install a `.mcpb` and reinstall it on every change. It listens on
+  127.0.0.1, and `npm run dev:http` starts it against the working directory.
+  Stdio remains the default, because that is what an installed host spawns.
+
+### Fixed
+
+- **A panel left open across a server restart said only that its proposal id was
+  unknown.** A host restarts the server whenever the extension is installed or
+  updated, so every panel already on screen holds an id the new process never
+  issued — a routine event that read as a dead panel with no next step. It now
+  says what happened and that the write has to be asked for again.
+- **A port already in use reported the raw listen error** instead of saying so,
+  which matters in a loop where the server is restarted constantly.
+- **CI checked for a missing version bump only on pull requests**, so a commit
+  pushed straight to main could land source changes under a version already
+  published. It compares against the last release now, on every run.
+
 ## [0.6.1] - 2026-08-31
 
 Four more audits — bug hunting, refactoring, tooling and test quality — each
@@ -613,7 +637,8 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...v0.6.1
 [0.5.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.0...v0.5.1

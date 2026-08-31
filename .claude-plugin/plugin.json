@@ -1,7 +1,7 @@
 {
   "name": "interactive-editor",
   "displayName": "Interactive Editor",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "An interactive editor in front of every file write. The model proposes; you edit the proposal by hand and decide whether it lands.",
   "author": {
     "name": "skurekjakub",

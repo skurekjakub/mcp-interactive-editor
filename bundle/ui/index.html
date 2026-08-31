@@ -73,7 +73,7 @@ ${r.map(c=>`  ${c}`).join(`
 `),startLine:i,endLine:u}}function yn(n){const r=Math.min(n.startLine,n.endLine),o=Math.max(n.startLine,n.endLine);return r===o?`line ${r}`:`lines ${r}–${o}`}function ay(n,r){return n.some(o=>o.id===r.id)?n:[...n,r]}function yw(n,r,o){return n.map(c=>c.id===r?{...c,note:o}:c)}function My(n){return[...n].sort((r,o)=>r.startLine-o.startLine||r.endLine-o.endLine)}function Bo(n){return(n.note??"").trim().length>0}function Cy(n){return n.filter(r=>!Bo(r))}function ry(n,r,o){if(r.length===0)return o;const c=My(r),i=[`From the draft open in the interactive editor — \`${n}\`:`];for(const u of c){const d=u.source==="diff"?" (from the diff)":"";i.push("",`${yn(u)}${d}:`,bw(u.text)),Bo(u)&&i.push(...(u.note??"").trim().split(`
 `).map(p=>`> ${p}`))}return o.trim().length>0&&i.push("",o.trim()),i.join(`
 `)}function bw(n){const o=(n.match(/`+/g)??[]).reduce((i,u)=>Math.max(i,u.length),0),c="`".repeat(Math.max(3,o+1));return[c,n,c].join(`
-`)}const Ao="0.6.1",Iy={roots:["/preview"],dryRun:!0,serverVersion:Ao};function Do(){return typeof window<"u"&&window.parent===window}function _w(n){return{callTool:(r,o)=>n.callServerTool({name:r,arguments:o}),updateModelContext:r=>n.updateModelContext(r),sendMessage:r=>n.sendMessage({role:"user",content:[{type:"text",text:r}]})}}const _f=`# Deploy pipeline
+`)}const Ao="0.6.2",Iy={roots:["/preview"],dryRun:!0,serverVersion:Ao};function Do(){return typeof window<"u"&&window.parent===window}function _w(n){return{callTool:(r,o)=>n.callServerTool({name:r,arguments:o}),updateModelContext:r=>n.updateModelContext(r),sendMessage:r=>n.sendMessage({role:"user",content:[{type:"text",text:r}]})}}const _f=`# Deploy pipeline
 name: deploy
 
 on:

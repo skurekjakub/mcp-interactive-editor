@@ -95,21 +95,31 @@ jobs:
         # rebuilds only when that number changes, so shipping a change without a
         # bump leaves every existing install on the tree it first installed. The
         # symptom is indistinguishable from a restart that did not take.
-        if: github.event_name == 'pull_request'
+        #
+        # Compared against the last release rather than the merge base, so a
+        # commit pushed straight to main is checked too. Gating this on
+        # pull_request let a direct push land source changes under a version
+        # already published, which is two different builds answering to one
+        # number — the exact thing the rule exists to prevent.
         run: |
-          base="origin/${{ github.base_ref }}"
-          changed=$(git diff --name-only "$base"...HEAD -- src shared ui | wc -l)
-          if [ "$changed" -eq 0 ]; then
-            echo "No source changes; no bump required."
+          git fetch --tags --quiet
+          last=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -z "$last" ]; then
+            echo "No release to compare against yet."
             exit 0
           fi
-          before=$(git show "$base:package.json" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')
-          after=$(node -pe 'require("./package.json").version')
-          if [ "$before" = "$after" ]; then
-            echo "::error::src/, shared/ or ui/ changed but the version is still $after — run 'npm run bump -- <next>'"
+          changed=$(git diff --name-only "$last"...HEAD -- src shared ui | wc -l)
+          if [ "$changed" -eq 0 ]; then
+            echo "No source changes since $last; no bump required."
+            exit 0
+          fi
+          released=${last#v}
+          declared=$(node -pe 'require("./package.json").version')
+          if [ "$released" = "$declared" ]; then
+            echo "::error::src/, shared/ or ui/ changed since $last but the version is still $declared — run 'npm run bump -- <next>'"
             exit 1
           fi
-          echo "Version moved $before -> $after."
+          echo "Source moved since $last, and the version moved $released -> $declared."
 
       - name: Pack the extension
         # `mcpb pack` validates the manifest against its schema, which nothing
