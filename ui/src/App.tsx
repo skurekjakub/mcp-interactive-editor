@@ -142,7 +142,7 @@ export function App() {
             : `lines ${selected.startLine}–${selected.endLine}`;
 
         await bridge.sendMessage(
-          `From the draft open in the edit editor — \`${state.proposal.target.display}\`, ${range}:\n\n` +
+          `From the draft open in the interactive editor — \`${state.proposal.target.display}\`, ${range}:\n\n` +
             "```\n" +
             selected.text +
             "\n```" +

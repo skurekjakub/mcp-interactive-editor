@@ -29518,7 +29518,7 @@ function editorResult(guard, proposalId) {
 function summaryResult(guard, proposalId) {
   const state = buildEditorState(guard, getProposal(proposalId));
   const { target } = state.proposal;
-  const text = target.absolute ? `Opened ${target.display} in the edit editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : `Refused: "${target.requested}" is outside the roots this editor will write to.`;
+  const text = target.absolute ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : `Refused: "${target.requested}" is outside the roots this editor will write to.`;
   return {
     content: [{ type: "text", text }],
     structuredContent: state

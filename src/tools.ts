@@ -449,7 +449,7 @@ function summaryResult(guard: FsGuard, proposalId: string): CallToolResult {
   const { target } = state.proposal;
 
   const text = target.absolute
-    ? `Opened ${target.display} in the edit editor (${target.onDisk?.lines ?? 0} lines). ` +
+    ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). ` +
       `The contents are in the panel, not in this result — call read_file if you need to see them. ` +
       `Wait for the human; they may edit and save, or close it without saving.`
     : `Refused: "${target.requested}" is outside the roots this editor will write to.`;

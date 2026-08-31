@@ -155,7 +155,7 @@ describe("opening a file to read and edit", () => {
     const opened = await call("open_file", { path: target });
 
     expect(text(opened)).not.toContain("sentinel-contents-do-not-leak");
-    expect(text(opened)).toMatch(/Opened .* in the edit editor/);
+    expect(text(opened)).toMatch(/Opened .* in the interactive editor/);
     expect(text(opened)).toMatch(/read_file/);
   });
 
