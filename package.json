@@ -12,6 +12,7 @@
     "pack": "npm run build && npm run bundle && mcpb pack bundle dist/mcp-interactive-editor.mcpb",
     "preview": "vite --port 5178",
     "dev:http": "npm run build && node dist/src/server.js --http --root-from-cwd",
+    "dev:inspect": "mcp-inspector --web --config mcp.json --server interactive-editor",
     "pretest": "npm run build && npm run bundle",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@anthropic-ai/mcpb": "^2.1.2",
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/inspector": "^2.4.0",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.6",
     "@types/node": "^24.0.0",
@@ -82,5 +84,8 @@
   "bugs": {
     "url": "https://github.com/skurekjakub/mcp-interactive-editor/issues"
   },
-  "private": true
+  "private": true,
+  "allowScripts": {
+    "@modelcontextprotocol/inspector@2.4.0": true
+  }
 }
