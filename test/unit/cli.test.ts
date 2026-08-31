@@ -128,3 +128,41 @@ describe("the rest of the surface", () => {
     expect(() => parse(["--wat"])).toThrow(/Unknown flag --wat/);
   });
 });
+
+describe("choosing a transport", () => {
+  it("stays on stdio unless asked, because that is what a host spawns", () => {
+    expect(parse(["--root", resolve("/work")]).http).toBe(false);
+  });
+
+  it("switches to HTTP on the flag", () => {
+    const cli = parse(["--root", resolve("/work"), "--http"]);
+
+    expect(cli).toMatchObject({ http: true, httpPort: 3001 });
+  });
+
+  it("takes a port, and implies the flag rather than needing both", () => {
+    // Arrange & Act: naming a port and not getting HTTP would be a silent no-op.
+    const cli = parse(["--root", resolve("/work"), "--http-port", "4000"]);
+
+    // Assert.
+    expect(cli).toMatchObject({ http: true, httpPort: 4000 });
+  });
+
+  it("refuses a port that is not a number", () => {
+    expect(() => parse(["--http-port=eight"])).toThrow(/positive number/);
+  });
+
+  it("allows the reference host and inspector origins out of the box", () => {
+    const { allowedOrigins } = parse(["--root", resolve("/work")]);
+
+    expect(allowedOrigins).toContain("http://localhost:8080");
+    expect(allowedOrigins).toContain("http://localhost:6274");
+  });
+
+  it("appends an extra origin rather than replacing the defaults", () => {
+    const { allowedOrigins } = parse(["--allow-origin", "http://localhost:9999"]);
+
+    expect(allowedOrigins).toContain("http://localhost:9999");
+    expect(allowedOrigins).toContain("http://localhost:8080");
+  });
+});

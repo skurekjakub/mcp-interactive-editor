@@ -111,8 +111,17 @@ export function getProposal(proposalId: string): Proposal {
     if (ended) {
       throw new Error(`This proposal was ${ended} to make room for newer ones. Open a new one.`);
     }
+    /*
+     * The panel outlives the server process. A host restarts the server when
+     * the extension is installed or updated, and every panel already on screen
+     * keeps an id the new process has never heard of — so this is what a human
+     * sees after an update, and "unknown id" alone leaves them staring at a
+     * dead panel with nothing to do about it.
+     */
     throw new Error(
-      `Unknown proposal ${proposalId}. It probably belongs to a previous run of the server.`,
+      `Unknown proposal ${proposalId}. This panel belongs to an earlier run of the server — ` +
+        `it was probably restarted, which happens when the extension is installed or updated. ` +
+        `The draft is gone with it; ask for the write again to get a fresh panel.`,
     );
   }
   return proposal;

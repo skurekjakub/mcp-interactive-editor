@@ -11,6 +11,7 @@
     "bump": "node scripts/bump-version.mjs",
     "pack": "npm run build && npm run bundle && mcpb pack bundle dist/mcp-interactive-editor.mcpb",
     "preview": "vite --port 5178",
+    "dev:http": "npm run build && node dist/src/server.js --http --root-from-cwd",
     "pretest": "npm run build && npm run bundle",
     "test": "vitest run",
     "test:watch": "vitest",

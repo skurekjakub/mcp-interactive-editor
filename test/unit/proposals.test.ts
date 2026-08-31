@@ -147,8 +147,13 @@ describe("retention", () => {
     expect(() => getProposal(first.proposalId)).toThrow(/superseded to make room/);
   });
 
-  it("still reports a genuinely unknown id as unknown", () => {
-    expect(() => getProposal("11111111-2222-3333-4444-555555555555")).toThrow(/previous run/);
+  it("tells a panel that outlived the server what to do about it", () => {
+    // A host restarts the server when the extension is updated, and every panel
+    // already on screen holds an id the new process never issued. Saying only
+    // that the id is unknown leaves a dead panel and no next step.
+    expect(() => getProposal("11111111-2222-3333-4444-555555555555")).toThrow(
+      /earlier run of the server[\s\S]*ask for the write again/i,
+    );
   });
 
   it("drops resolved proposals before open ones", async () => {

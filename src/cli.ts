@@ -19,9 +19,26 @@ export interface Cli {
   reviewTimeoutMs?: number;
   reviewGraceMs?: number;
   blockOnReview: boolean;
+  /** Serve over Streamable HTTP instead of stdio. */
+  http: boolean;
+  /** Port for the HTTP transport. */
+  httpPort: number;
+  /** Browser origins allowed to reach the HTTP transport. */
+  allowedOrigins: string[];
   /** True when help was asked for, which the caller prints and exits on. */
   help?: boolean;
 }
+
+/** Where the reference host and the common inspectors serve their pages from. */
+const DEFAULT_ORIGINS = [
+  "http://localhost:8080",
+  "http://127.0.0.1:8080",
+  "http://localhost:6274",
+  "http://127.0.0.1:6274",
+];
+
+/** Port the HTTP transport uses when none is given. */
+const DEFAULT_HTTP_PORT = 3001;
 
 /**
  * Reads the dry-run setting from the environment.
@@ -148,6 +165,9 @@ export function parseArgs(argv: string[], environment: ParseEnvironment = {}): C
     dryRun: dryRunFromEnv(env),
     terminalApproval: false,
     blockOnReview: false,
+    http: false,
+    httpPort: DEFAULT_HTTP_PORT,
+    allowedOrigins: [...DEFAULT_ORIGINS],
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -182,6 +202,18 @@ export function parseArgs(argv: string[], environment: ParseEnvironment = {}): C
       cli.deny.push(inlineValue("--deny", arg));
     } else if (arg === "--allow-everything-in-roots") {
       cli.deny = [];
+    } else if (arg === "--http") {
+      cli.http = true;
+    } else if (arg === "--http-port") {
+      cli.http = true;
+      cli.httpPort = positiveInt(arg, nextValue(arg, argv, ++i));
+    } else if (arg.startsWith("--http-port=")) {
+      cli.http = true;
+      cli.httpPort = positiveInt("--http-port", inlineValue("--http-port", arg));
+    } else if (arg === "--allow-origin") {
+      cli.allowedOrigins.push(nextValue(arg, argv, ++i));
+    } else if (arg.startsWith("--allow-origin=")) {
+      cli.allowedOrigins.push(inlineValue("--allow-origin", arg));
     } else if (arg === "--dry-run") {
       cli.dryRun = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -218,6 +250,13 @@ Options:
                                where it does not, the panel never loads. Off by default.
   --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
   --review-grace-ms <ms>       How long to wait for the panel to attach. Default 30000.
+  --http                       Serve over Streamable HTTP on 127.0.0.1 instead of stdio.
+                               For browser hosts and inspectors, which cannot spawn
+                               a process. Stdio stays the default.
+  --http-port <n>              Port for --http. Default 3001.
+  --allow-origin <origin>      Extra browser origin allowed to call the HTTP endpoint.
+                               Repeatable. The reference host and inspector ports
+                               are allowed already.
   -h, --help                   This.
 
 A value that begins with a flag is refused rather than consumed, so a missing
