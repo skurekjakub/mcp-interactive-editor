@@ -26,6 +26,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   where they are unit tested. The panes keep only the part that needs a browser.
 - The server's `instructions` describe what the editor is for rather than what
   the model may not do.
+- **One module per tool.** `src/tools.ts` became `src/tools/`, a file per tool
+  plus `context.ts` (what every tool is handed), `view.ts`, `commit.ts` and
+  `results.ts`. Adding a tool is now a new file and one line in `index.ts`, and
+  `index.ts` is the only place that says which side of the model/app visibility
+  line a tool falls on. The result shaping in `results.ts` is pure and tested.
+- **The panel is components and hooks.** `App.tsx` went from ~470 lines to
+  wiring: lifetimes live in `hooks/` (`useProposalSession`, `usePassages`,
+  `useCommitFlow`) and shapes live in `components/` (`ProposalTag`,
+  `ReviewPanes`, `Threshold`, `Receipt`, `ViewToggle`). Pure UI helpers live in
+  `ui/src/lib/`, which is now covered by the test config — that directory is
+  pure by rule, and anything touching the DOM stays out of it.
+- Fixed a path in the panel-HTML fallback that climbed one level too far and
+  would have looked outside the package when running from source.
 
 ### Added
 

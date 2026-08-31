@@ -1,8 +1,6 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { passageFromSelection, type Passage } from "../../../shared/passages.js";
 
-export type { Passage };
-
 interface EditorProps {
   value: string;
   readOnly?: boolean;

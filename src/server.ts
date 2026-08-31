@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { DEFAULT_DENY, FsGuard } from "./fsGuard.js";
-import { registerTools } from "./tools.js";
+import { registerTools } from "./tools/index.js";
 
 interface Cli {
   roots: string[];

@@ -28748,7 +28748,7 @@ function toPosix(p2) {
   return p2.split(sep).join("/");
 }
 
-// src/tools.ts
+// src/tools/view.ts
 import { readFile as readFile2 } from "node:fs/promises";
 import { dirname as dirname2, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28847,6 +28847,56 @@ function K3(Z, $, J, X) {
 function N3(Z, $, J, X, V) {
   return Z.registerResource($, J, { mimeType: p, ...X }, V);
 }
+
+// src/tools/context.ts
+var VIEW_URI = "ui://interactive-editor/panel.html";
+
+// src/tools/view.ts
+function registerEditorView(server) {
+  N3(
+    server,
+    "Interactive Editor",
+    VIEW_URI,
+    {
+      mimeType: p,
+      _meta: {
+        ui: {
+          // The bundle is inlined, so the View needs nothing from the network.
+          // Every list stays empty on purpose: an editor that can phone home is
+          // a worse thing than the writes it is guarding.
+          csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
+          prefersBorder: true
+        }
+      }
+    },
+    async (uri) => ({
+      contents: [{ uri: uri.href, mimeType: p, text: await loadViewHtml() }]
+    })
+  );
+}
+var cachedHtml;
+async function loadViewHtml() {
+  if (cachedHtml) return cachedHtml;
+  const here = dirname2(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve2(here, "../../ui/index.html"),
+    // dist/src/tools -> dist/ui
+    resolve2(here, "../../dist/ui/index.html")
+    // src/tools -> dist/ui
+  ];
+  for (const candidate of candidates) {
+    try {
+      cachedHtml = await readFile2(candidate, "utf8");
+      return cachedHtml;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("The panel is not built. Run `npm run build` first.");
+}
+
+// src/proposals.ts
+import { randomUUID } from "node:crypto";
 
 // shared/diff.ts
 var LCS_LINE_BUDGET = 1500;
@@ -29155,7 +29205,6 @@ function hasBlockers(findings) {
 }
 
 // src/proposals.ts
-import { randomUUID } from "node:crypto";
 var proposals = /* @__PURE__ */ new Map();
 async function createProposal(guard, input) {
   const target = await guard.describe(input.path);
@@ -29213,57 +29262,86 @@ function diffStatsFor(proposal) {
   return diffLines(proposal.baseline, after).stats;
 }
 
-// src/tools.ts
-var VIEW_URI = "ui://interactive-editor/panel.html";
-function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
-  registerEditorView(server);
-  registerProposalTools(server, guard);
-  registerAppOnlyTools(server, guard, options);
-  registerReadTools(server, guard);
+// src/tools/results.ts
+var MODEL_DIFF_LINE_BUDGET = 80;
+function handleFor(state) {
+  const { proposal } = state;
+  return {
+    proposalId: proposal.proposalId,
+    display: proposal.target.display,
+    mode: proposal.mode,
+    ...proposal.target.absolute ? {} : { refused: true }
+  };
 }
-function registerEditorView(server) {
-  N3(
-    server,
-    "Interactive Editor",
-    VIEW_URI,
-    {
-      mimeType: p,
-      _meta: {
-        ui: {
-          // The bundle is inlined, so the View needs nothing from the network.
-          // Every list stays empty on purpose: an editor that can phone home is
-          // a worse thing than the writes it is guarding.
-          csp: { connectDomains: [], resourceDomains: [], frameDomains: [] },
-          prefersBorder: true
-        }
-      }
-    },
-    async (uri) => ({
-      contents: [{ uri: uri.href, mimeType: p, text: await loadViewHtml() }]
-    })
-  );
+function openerResult(state) {
+  return {
+    content: [{ type: "text", text: describeState(state) }],
+    structuredContent: handleFor(state)
+  };
 }
-var cachedHtml;
-async function loadViewHtml() {
-  if (cachedHtml) return cachedHtml;
-  const here = dirname2(fileURLToPath(import.meta.url));
-  const candidates = [
-    resolve2(here, "../ui/index.html"),
-    // dist/src -> dist/ui
-    resolve2(here, "../../dist/ui/index.html")
-    // running from src/ via tsx
-  ];
-  for (const candidate of candidates) {
-    try {
-      cachedHtml = await readFile2(candidate, "utf8");
-      return cachedHtml;
-    } catch {
-      continue;
-    }
+function openedFileResult(state) {
+  const { target } = state.proposal;
+  const text = target.absolute ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : `Refused: "${target.requested}" is outside the roots this editor will write to.`;
+  return {
+    content: [{ type: "text", text }],
+    structuredContent: handleFor(state)
+  };
+}
+function panelResult(state, note) {
+  return {
+    content: [{ type: "text", text: note }],
+    structuredContent: state
+  };
+}
+function describeState(state) {
+  const { proposal, findings } = state;
+  if (!proposal.target.absolute) {
+    return `Refused: "${proposal.target.requested}" is outside the roots this editor will write to.
+Writable roots:
+${state.roots.map((r2) => `  ${r2}`).join("\n")}`;
   }
-  throw new Error("The panel is not built. Run `npm run build` first.");
+  const stats = diffStatsFor(proposal);
+  const lines = [
+    `Editor open \u2014 nothing has been written.`,
+    ``,
+    `  ${proposal.mode.toUpperCase()}  ${proposal.target.display}`,
+    `  +${stats.added} / -${stats.removed} lines${state.dryRun ? "  (dry run)" : ""}`,
+    ``
+  ];
+  if (findings.length > 0) {
+    lines.push("Findings:");
+    for (const f2 of findings) {
+      lines.push(`  [${f2.severity}] ${f2.message}`);
+    }
+    lines.push("");
+  }
+  lines.push(
+    diffForModel(state),
+    ``,
+    `The human reviews and edits this in the editor, then presses the button. You cannot write the file yourself \u2014 wait for them, and do not re-propose the same write.`
+  );
+  return lines.join("\n");
 }
-function registerProposalTools(server, guard) {
+function diffForModel(state) {
+  const full = formatUnifiedDiff(state.diff, state.proposal.target.display);
+  const lines = full.split("\n");
+  if (lines.length <= MODEL_DIFF_LINE_BUDGET) return full;
+  return [
+    ...lines.slice(0, MODEL_DIFF_LINE_BUDGET),
+    `\u2026 and ${lines.length - MODEL_DIFF_LINE_BUDGET} more diff lines, shown in full in the panel.`
+  ].join("\n");
+}
+function describeReceipt(receipt) {
+  const verb = receipt.mode === "delete" ? "Deleted" : "Wrote";
+  const edited = receipt.editedByHuman ? " The human edited your proposal before approving it \u2014 the content above is what actually landed." : "";
+  return `${verb} ${receipt.display} (${receipt.lines} lines, ${receipt.bytes} bytes).` + (receipt.dryRun ? " DRY RUN \u2014 nothing reached disk." : "") + edited;
+}
+function errorResult(message) {
+  return { content: [{ type: "text", text: message }], isError: true };
+}
+
+// src/tools/proposeWrite.ts
+function registerProposeWrite(server, { guard }) {
   K3(
     server,
     "propose_write",
@@ -29286,9 +29364,13 @@ function registerProposalTools(server, guard) {
         mode: target.exists ? "overwrite" : "create",
         rationale
       });
-      return openerResult(guard, proposal.proposalId);
+      return openerResult(buildEditorState(guard, proposal));
     }
   );
+}
+
+// src/tools/openFile.ts
+function registerOpenFile(server, { guard }) {
   K3(
     server,
     "open_file",
@@ -29311,9 +29393,13 @@ function registerProposalTools(server, guard) {
         mode: target.exists ? "overwrite" : "create",
         rationale: note ?? "Opened for editing. Nothing changes until it is saved."
       });
-      return summaryResult(guard, proposal.proposalId);
+      return openedFileResult(buildEditorState(guard, proposal));
     }
   );
+}
+
+// src/tools/proposeDelete.ts
+function registerProposeDelete(server, { guard }) {
   K3(
     server,
     "propose_delete",
@@ -29334,11 +29420,13 @@ function registerProposalTools(server, guard) {
         mode: "delete",
         rationale
       });
-      return openerResult(guard, proposal.proposalId);
+      return openerResult(buildEditorState(guard, proposal));
     }
   );
 }
-function registerAppOnlyTools(server, guard, options) {
+
+// src/tools/editorAttach.ts
+function registerEditorAttach(server, { guard }) {
   K3(
     server,
     "editor_attach",
@@ -29350,10 +29438,17 @@ function registerAppOnlyTools(server, guard, options) {
     },
     async ({ proposalId }) => {
       await refreshTarget(guard, getProposal(proposalId));
-      updateProposal(proposalId, { attached: true });
-      return editorResult(guard, proposalId, "Attached. The panel has the proposal.");
+      const proposal = updateProposal(proposalId, { attached: true });
+      return panelResult(
+        buildEditorState(guard, proposal),
+        "Attached. The panel has the proposal."
+      );
     }
   );
+}
+
+// src/tools/editorUpdate.ts
+function registerEditorUpdate(server, { guard }) {
   K3(
     server,
     "editor_update",
@@ -29383,94 +29478,12 @@ function registerAppOnlyTools(server, guard, options) {
           mode: next.mode === "delete" ? "delete" : target.exists ? "overwrite" : "create"
         });
       }
-      return editorResult(guard, proposalId, "Updated.");
-    }
-  );
-  K3(
-    server,
-    "editor_commit",
-    {
-      title: "Commit the reviewed write",
-      description: "The editor. Writes the human-approved content to disk. Called only by the panel, only on an explicit click. Not for agent use \u2014 the host blocks agent calls to this tool.",
-      inputSchema: { proposalId: external_exports.string() },
-      _meta: { ui: { visibility: options.commitVisibility } }
-    },
-    async ({ proposalId }) => {
-      const receipt = await commit(guard, proposalId);
-      return {
-        content: [{ type: "text", text: describeReceipt(receipt) }],
-        structuredContent: receipt
-      };
-    }
-  );
-  K3(
-    server,
-    "editor_discard",
-    {
-      title: "Discard a proposal",
-      description: "Called by the panel when the human closes without writing. Not for agent use.",
-      inputSchema: { proposalId: external_exports.string(), reason: external_exports.string().optional() },
-      _meta: { ui: { visibility: ["app"] } }
-    },
-    async ({ proposalId, reason }) => {
-      const proposal = getProposal(proposalId);
-      updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Discarded. Nothing was written to ${proposal.target.display}.` + (reason ? ` Reason: ${reason}` : "")
-          }
-        ]
-      };
+      return panelResult(buildEditorState(guard, next), "Updated.");
     }
   );
 }
-function registerReadTools(server, guard) {
-  K3(
-    server,
-    "read_file",
-    {
-      title: "Read a file inside the roots",
-      description: "Read a file the editor is allowed to write, so a proposal can be based on what is actually there. Refuses anything outside the configured roots.",
-      inputSchema: { path: external_exports.string() },
-      annotations: { readOnlyHint: true, openWorldHint: false },
-      _meta: { ui: { visibility: ["model", "app"] } }
-    },
-    async ({ path }) => {
-      const target = await guard.describe(path);
-      if (!target.absolute) {
-        return errorResult(`${path} is outside the roots this server will touch.`);
-      }
-      if (!target.exists) {
-        return { content: [{ type: "text", text: `${target.display} does not exist.` }] };
-      }
-      const body = await guard.read(target.absolute);
-      return { content: [{ type: "text", text: body }] };
-    }
-  );
-  K3(
-    server,
-    "list_roots",
-    {
-      title: "List writable roots",
-      description: "The directories this editor will write inside. Everything else is refused.",
-      inputSchema: {},
-      annotations: { readOnlyHint: true, openWorldHint: false },
-      _meta: { ui: { visibility: ["model", "app"] } }
-    },
-    async () => ({
-      content: [
-        {
-          type: "text",
-          text: `Writable roots:
-${guard.roots.map((r2) => `  ${r2}`).join("\n")}` + (guard.dryRun ? "\n\nDRY RUN: commits are simulated, nothing reaches disk." : "")
-        }
-      ],
-      structuredContent: { roots: guard.roots, dryRun: guard.dryRun }
-    })
-  );
-}
+
+// src/tools/commit.ts
 async function commit(guard, proposalId) {
   const before = getProposal(proposalId);
   if (before.committedAt) throw new Error("This proposal has already been resolved.");
@@ -29508,85 +29521,118 @@ ${blockers.map((b) => `  - ${b}`).join("\n")}`);
     content: proposal.content
   };
 }
-var MODEL_DIFF_LINE_BUDGET = 80;
-function openerResult(guard, proposalId) {
-  const state = buildEditorState(guard, getProposal(proposalId));
-  return {
-    content: [{ type: "text", text: describeState(state) }],
-    structuredContent: handleFor(state)
-  };
-}
-function summaryResult(guard, proposalId) {
-  const state = buildEditorState(guard, getProposal(proposalId));
-  const { target } = state.proposal;
-  const text = target.absolute ? `Opened ${target.display} in the interactive editor (${target.onDisk?.lines ?? 0} lines). The contents are in the panel, not in this result \u2014 call read_file if you need to see them. Wait for the human; they may edit and save, or close it without saving.` : `Refused: "${target.requested}" is outside the roots this editor will write to.`;
-  return {
-    content: [{ type: "text", text }],
-    structuredContent: handleFor(state)
-  };
-}
-function handleFor(state) {
-  const { proposal } = state;
-  return {
-    proposalId: proposal.proposalId,
-    display: proposal.target.display,
-    mode: proposal.mode,
-    ...proposal.target.absolute ? {} : { refused: true }
-  };
-}
-function editorResult(guard, proposalId, note) {
-  const state = buildEditorState(guard, getProposal(proposalId));
-  return {
-    content: [{ type: "text", text: note }],
-    structuredContent: state
-  };
-}
-function describeState(state) {
-  const { proposal, findings } = state;
-  const stats = diffStatsFor(proposal);
-  const lines = [];
-  if (!proposal.target.absolute) {
-    return `Refused: "${proposal.target.requested}" is outside the roots this editor will write to.
-Writable roots:
-${state.roots.map((r2) => `  ${r2}`).join("\n")}`;
-  }
-  lines.push(
-    `Editor open \u2014 nothing has been written.`,
-    ``,
-    `  ${proposal.mode.toUpperCase()}  ${proposal.target.display}`,
-    `  +${stats.added} / -${stats.removed} lines${state.dryRun ? "  (dry run)" : ""}`,
-    ``
-  );
-  if (findings.length > 0) {
-    lines.push("Findings:");
-    for (const f2 of findings) {
-      lines.push(`  [${f2.severity}] ${f2.message}`);
+
+// src/tools/editorCommit.ts
+function registerEditorCommit(server, { guard, commitVisibility }) {
+  K3(
+    server,
+    "editor_commit",
+    {
+      title: "Commit the reviewed write",
+      description: "The editor. Writes the human-approved content to disk. Called only by the panel, only on an explicit click. Not for agent use \u2014 the host blocks agent calls to this tool.",
+      inputSchema: { proposalId: external_exports.string() },
+      _meta: { ui: { visibility: commitVisibility } }
+    },
+    async ({ proposalId }) => {
+      const receipt = await commit(guard, proposalId);
+      return {
+        content: [{ type: "text", text: describeReceipt(receipt) }],
+        structuredContent: receipt
+      };
     }
-    lines.push("");
-  }
-  lines.push(
-    diffForModel(state),
-    ``,
-    `The human reviews and edits this in the editor, then presses the button. You cannot write the file yourself \u2014 wait for them, and do not re-propose the same write.`
   );
-  return lines.join("\n");
 }
-function diffForModel(state) {
-  const full = formatUnifiedDiff(state.diff, state.proposal.target.display);
-  const lines = full.split("\n");
-  if (lines.length <= MODEL_DIFF_LINE_BUDGET) return full;
-  return [
-    ...lines.slice(0, MODEL_DIFF_LINE_BUDGET),
-    `\u2026 and ${lines.length - MODEL_DIFF_LINE_BUDGET} more diff lines, shown in full in the panel.`
-  ].join("\n");
+
+// src/tools/editorDiscard.ts
+function registerEditorDiscard(server, _ctx) {
+  K3(
+    server,
+    "editor_discard",
+    {
+      title: "Discard a proposal",
+      description: "Called by the panel when the human closes without writing. Not for agent use.",
+      inputSchema: { proposalId: external_exports.string(), reason: external_exports.string().optional() },
+      _meta: { ui: { visibility: ["app"] } }
+    },
+    async ({ proposalId, reason }) => {
+      const proposal = getProposal(proposalId);
+      updateProposal(proposalId, { committedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Discarded. Nothing was written to ${proposal.target.display}.` + (reason ? ` Reason: ${reason}` : "")
+          }
+        ]
+      };
+    }
+  );
 }
-function describeReceipt(receipt) {
-  const verb = receipt.mode === "delete" ? "Deleted" : "Wrote";
-  const edited = receipt.editedByHuman ? " The human edited your proposal before approving it \u2014 the content above is what actually landed." : "";
-  return `${verb} ${receipt.display} (${receipt.lines} lines, ${receipt.bytes} bytes).` + (receipt.dryRun ? " DRY RUN \u2014 nothing reached disk." : "") + edited;
+
+// src/tools/readFile.ts
+function registerReadFile(server, { guard }) {
+  K3(
+    server,
+    "read_file",
+    {
+      title: "Read a file inside the roots",
+      description: "Read a file the editor is allowed to write, so a proposal can be based on what is actually there. Refuses anything outside the configured roots.",
+      inputSchema: { path: external_exports.string() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["model", "app"] } }
+    },
+    async ({ path }) => {
+      const target = await guard.describe(path);
+      if (!target.absolute) {
+        return errorResult(`${path} is outside the roots this server will touch.`);
+      }
+      if (!target.exists) {
+        return { content: [{ type: "text", text: `${target.display} does not exist.` }] };
+      }
+      const body = await guard.read(target.absolute);
+      return { content: [{ type: "text", text: body }] };
+    }
+  );
 }
-function errorResult(message) {
-  return { content: [{ type: "text", text: message }], isError: true };
+
+// src/tools/listRoots.ts
+function registerListRoots(server, { guard }) {
+  K3(
+    server,
+    "list_roots",
+    {
+      title: "List writable roots",
+      description: "The directories this editor will write inside. Everything else is refused.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["model", "app"] } }
+    },
+    async () => ({
+      content: [
+        {
+          type: "text",
+          text: `Writable roots:
+${guard.roots.map((r2) => `  ${r2}`).join("\n")}` + (guard.dryRun ? "\n\nDRY RUN: commits are simulated, nothing reaches disk." : "")
+        }
+      ],
+      structuredContent: { roots: guard.roots, dryRun: guard.dryRun }
+    })
+  );
+}
+
+// src/tools/index.ts
+function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
+  const context = { guard, commitVisibility: options.commitVisibility };
+  registerEditorView(server);
+  registerProposeWrite(server, context);
+  registerOpenFile(server, context);
+  registerProposeDelete(server, context);
+  registerEditorAttach(server, context);
+  registerEditorUpdate(server, context);
+  registerEditorCommit(server, context);
+  registerEditorDiscard(server, context);
+  registerReadFile(server, context);
+  registerListRoots(server, context);
 }
 
 // src/server.ts
