@@ -1,6 +1,6 @@
 {
   "name": "mcp-interactive-editor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "An MCP App that opens an interactive editor for every file write a model proposes. You edit it by hand, and nothing reaches disk until you say so.",
   "files": [
@@ -14,7 +14,7 @@
     "bump": "node scripts/bump-version.mjs",
     "pack": "npm run bundle && mcpb pack bundle dist/mcp-interactive-editor.mcpb",
     "preview": "vite --port 5178",
-    "pretest": "npm run build",
+    "pretest": "npm run build && npm run bundle",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run test/unit",

@@ -28879,25 +28879,47 @@ function registerEditorView(server) {
     })
   );
 }
+var PANEL_CANDIDATES = ["../ui/index.html", "../../ui/index.html", "../../dist/ui/index.html"];
 var cachedHtml;
 async function loadViewHtml() {
   if (cachedHtml) return cachedHtml;
   const here = dirname2(fileURLToPath(import.meta.url));
-  const candidates = [
-    resolve2(here, "../../ui/index.html"),
-    // dist/src/tools -> dist/ui
-    resolve2(here, "../../dist/ui/index.html")
-    // src/tools -> dist/ui
-  ];
-  for (const candidate of candidates) {
+  const missing = [];
+  const rejected = [];
+  for (const candidate of PANEL_CANDIDATES) {
+    const path = resolve2(here, candidate);
+    let html;
     try {
-      cachedHtml = await readFile2(candidate, "utf8");
-      return cachedHtml;
+      html = await readFile2(path, "utf8");
     } catch {
+      missing.push(path);
       continue;
     }
+    const problem = whyNotPanel(html);
+    if (problem) {
+      rejected.push(`${path} \u2014 ${problem}`);
+      continue;
+    }
+    cachedHtml = html;
+    return cachedHtml;
   }
-  throw new Error("The panel is not built. Run `npm run build` first.");
+  throw new Error(
+    [
+      "Could not serve the editor panel.",
+      ...rejected.length > 0 ? ["Found, but not usable as the panel:", ...rejected.map((r2) => `  ${r2}`)] : [],
+      ...missing.length > 0 ? ["Not found:", ...missing.map((p2) => `  ${p2}`)] : [],
+      "`npm run build` produces it; `npm run bundle` puts it beside the server for",
+      "the shipped tree."
+    ].join("\n")
+  );
+}
+var MIN_PANEL_BYTES = 1e4;
+function whyNotPanel(html) {
+  if (html.includes("/src/main.tsx")) return "this is the vite entry stub, not a build";
+  if (html.length < MIN_PANEL_BYTES) {
+    return `only ${html.length} bytes, so it is not a complete build`;
+  }
+  return null;
 }
 
 // src/proposals.ts
@@ -29755,7 +29777,7 @@ ${HELP}`);
   const guard = new FsGuard({ roots: cli.roots, deny: cli.deny, dryRun: cli.dryRun });
   const commitVisibility = cli.terminalApproval ? ["model", "app"] : ["app"];
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.2.0" },
+    { name: "interactive-editor", version: "0.2.1" },
     {
       instructions: "propose_write opens an editable review panel: the human gets a live diff against disk, edits your draft in place, and saves. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves. Passages they select in either pane come back to you as quotes with line numbers."
     }

@@ -7,14 +7,20 @@
  *
  *   ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/
  *
- * and only rebuilds that directory when the *declared* version changes.
+ * and only rebuilds that directory when the declared version changes.
  * Refreshing the marketplace clone is not enough. Ship a change without a bump
  * and every existing install keeps running the tree it first installed, no
  * matter what `main` says — which is a bug that looks exactly like "the restart
  * did not work".
  *
+ * Every edit is computed and checked before anything is written. A partial bump
+ * is worse than no bump: the guard below reads `package.json`, so a run that
+ * failed halfway would report "already at that version" on the retry and leave
+ * the rest stale for good.
+ *
  * Usage: npm run bump -- 0.3.0
  */
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,52 +33,78 @@ if (!/^\d+\.\d+\.\d+$/.test(next ?? "")) {
   process.exit(2);
 }
 
-const readJson = (rel) => JSON.parse(readFileSync(join(ROOT, rel), "utf8"));
-const writeJson = (rel, doc) =>
-  writeFileSync(join(ROOT, rel), `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
+const current = JSON.parse(read("package.json")).version;
 
-const current = readJson("package.json").version;
 if (current === next) {
-  process.stderr.write(`Already at ${next}. Nothing to do.\n`);
+  process.stderr.write(`package.json is already at ${next}. Nothing to do.\n`);
   process.exit(0);
 }
 
-const touched = [];
+/** Every planned edit, as {rel, content}. Nothing is written until all succeed. */
+const planned = [];
+const problems = [];
 
 /** The manifests. `.claude-plugin/plugin.json` is the one that is the cache key. */
 for (const rel of ["package.json", "package-lock.json", ".claude-plugin/plugin.json"]) {
-  const doc = readJson(rel);
+  const doc = JSON.parse(read(rel));
+  if (doc.version !== current) {
+    problems.push(`${rel}: expected ${current}, found ${doc.version}`);
+    continue;
+  }
   doc.version = next;
   // The lockfile repeats it for the root package entry.
   if (doc.packages?.[""]) doc.packages[""].version = next;
-  writeJson(rel, doc);
-  touched.push(rel);
+  planned.push({ rel, content: `${JSON.stringify(doc, null, 2)}\n` });
 }
 
-const marketplace = readJson(".claude-plugin/marketplace.json");
-for (const plugin of marketplace.plugins) plugin.version = next;
-writeJson(".claude-plugin/marketplace.json", marketplace);
-touched.push(".claude-plugin/marketplace.json");
+const marketplace = JSON.parse(read(".claude-plugin/marketplace.json"));
+for (const plugin of marketplace.plugins) {
+  if (plugin.version !== current) {
+    problems.push(
+      `marketplace plugin ${plugin.name}: expected ${current}, found ${plugin.version}`,
+    );
+  }
+  plugin.version = next;
+}
+planned.push({
+  rel: ".claude-plugin/marketplace.json",
+  content: `${JSON.stringify(marketplace, null, 2)}\n`,
+});
 
 /** The two places the running code names itself over the wire. */
 for (const rel of ["src/server.ts", "ui/src/hooks/useProposalSession.ts"]) {
-  const path = join(ROOT, rel);
-  const before = readFileSync(path, "utf8");
-  const after = before.replace(
-    /(name: "interactive-editor", version: ")\d+\.\d+\.\d+(")/,
-    `$1${next}$2`,
-  );
-  if (after === before) {
-    process.stderr.write(`Could not find the version literal in ${rel}. Aborting.\n`);
-    process.exit(1);
+  const before = read(rel);
+  const pattern = /(name: "interactive-editor", version: ")\d+\.\d+\.\d+(")/;
+  if (!pattern.test(before)) {
+    problems.push(`${rel}: could not find the version literal`);
+    continue;
   }
-  writeFileSync(path, after, "utf8");
-  touched.push(rel);
+  planned.push({ rel, content: before.replace(pattern, `$1${next}$2`) });
 }
 
-process.stdout.write(`${current} -> ${next}\n${touched.map((t) => `  ${t}`).join("\n")}\n\n`);
+if (problems.length > 0) {
+  process.stderr.write(
+    `Refusing to bump — nothing has been written:\n${problems.map((p) => `  ${p}`).join("\n")}\n`,
+  );
+  process.exit(1);
+}
+
+for (const { rel, content } of planned) writeFileSync(join(ROOT, rel), content, "utf8");
+
+// Re-serialising JSON does not always agree with how prettier would print it,
+// and `npm run verify` runs `format:check`. Leaving the tree unformatted would
+// make a correct bump look like a failure.
+execFileSync("npx", ["prettier", "--write", ...planned.map((p) => p.rel)], {
+  cwd: ROOT,
+  stdio: "ignore",
+  shell: process.platform === "win32",
+});
+
 process.stdout.write(
-  "Deliberately untouched: server.json. It describes a published .mcpb with a\n" +
-    "checksum, so it should lag until that release actually exists.\n\n" +
-    "Next: add the section to CHANGELOG.md, then `npm run verify && npm run bundle`.\n",
+  `${current} -> ${next}\n${planned.map((p) => `  ${p.rel}`).join("\n")}\n\n` +
+    "server.json is not touched here. It describes a published .mcpb with a\n" +
+    "checksum, so it moves only when you actually cut the release — update its\n" +
+    "version, identifier URL and fileSha256 from the artifact you upload.\n\n" +
+    "Next: add the CHANGELOG.md section, then `npm run verify`.\n",
 );

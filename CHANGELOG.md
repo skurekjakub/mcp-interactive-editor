@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-31
+
+### Fixed
+
+- **The panel never rendered from the shipped bundle.** `0.2.0` went out looking
+  for the panel HTML at `../../ui/index.html` and `../../dist/ui/index.html`,
+  which are the nested `dist/` layout. The `.mcpb` and the Claude Code plugin
+  both run the flat layout — `<root>/server/index.js` beside `<root>/ui` — so
+  the packed server looked outside its own archive, found nothing, threw, and
+  the host reported `Unsupported UI resource content length: 0`. The panel was
+  in the archive the whole time, all 497 KB of it. Introduced when `tools.ts`
+  became `tools/`, and invisible because Claude Code never renders, so the
+  loader was never called there.
+- The panel loader now says which failure it hit — nothing found, the vite entry
+  stub, or a build too small to be complete. They want opposite fixes and all a
+  host surfaces is that the resource came back empty.
+- The loader also rejects a truncated build rather than serving it. Two of its
+  candidate paths resolve above the package root, and "non-empty HTML" was too
+  weak a test for something that gets handed the app-only tools.
+- `npm run bump` computes every edit before writing any of them. It used to
+  write five files and then abort on the sixth, and because its "already at that
+  version" guard reads `package.json` — which the failed run had advanced — the
+  obvious retry exited 0 and left the rest stale for good.
+
+### Changed
+
+- **The end-to-end suite runs against the shipped tree as well as `dist/`**, from
+  a copy outside the repository. Nothing ever executed what actually ships, which
+  is how the panel bug reached a release — and running `bundle/` in place would
+  not have caught it either, because from `<repo>/bundle/server` the candidate
+  `../../dist/ui/index.html` reaches the repo's real panel. That escape hatch
+  does not exist inside the archive. Verified by reintroducing the regression:
+  green in place, red from a copy. 62 e2e tests now, the whole suite twice.
+
 ## [0.2.0] — 2026-08-31
 
 ### Security
@@ -103,6 +137,7 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/skurekjakub/mcp-interactive-editor/releases/tag/v0.1.0

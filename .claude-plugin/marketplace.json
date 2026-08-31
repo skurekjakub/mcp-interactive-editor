@@ -11,8 +11,8 @@
       "name": "interactive-editor",
       "displayName": "Interactive Editor",
       "source": "./",
-      "description": "Claude proposes a file write; you edit the proposal by hand and decide whether it lands. In hosts that render MCP Apps you get an editor and a live diff. In a terminal you get the diff as text \u2014 and, unless you opt in to --terminal-approval, no way to commit at all.",
-      "version": "0.2.0",
+      "description": "Claude proposes a file write; you edit the proposal by hand and decide whether it lands. In hosts that render MCP Apps you get an editor and a live diff. In a terminal you get the diff as text — and, unless you opt in to --terminal-approval, no way to commit at all.",
+      "version": "0.2.1",
       "author": {
         "name": "skurekjakub",
         "url": "https://github.com/skurekjakub"

@@ -110,7 +110,7 @@ async function main(): Promise<void> {
     : ["app"];
 
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.2.0" },
+    { name: "interactive-editor", version: "0.2.1" },
     {
       instructions:
         "propose_write opens an editable review panel: the human gets a live diff against disk, " +
