@@ -61,8 +61,10 @@
     "vitest": "^3.2.7"
   },
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=22.0.0",
+    "npm": ">=11.0.0"
   },
+  "packageManager": "npm@11.16.0",
   "license": "MIT",
   "author": "skurekjakub",
   "keywords": [
