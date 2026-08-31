@@ -61,7 +61,15 @@ describe.each(ENTRY_POINTS)("running from %s", (_label, SERVER) => {
       // An opening call now waits for the human, so the timings are pinned
       // small here: a test that never attaches a panel should fall straight
       // through the grace period rather than sit out the real four seconds.
-      args: [SERVER, "--review-grace-ms", "250", "--review-timeout-ms", "4000", ...args],
+      args: [
+        SERVER,
+        "--block-on-review",
+        "--review-grace-ms",
+        "250",
+        "--review-timeout-ms",
+        "4000",
+        ...args,
+      ],
       stderr: "ignore",
     });
     const connected = new Client({ name: "editor-tests", version: "1.0.0" }, { capabilities });

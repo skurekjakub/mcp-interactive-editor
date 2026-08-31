@@ -86,6 +86,19 @@ export function usePassages(
           return;
         }
 
+        /*
+         * If an opening call was waiting, that call has just returned with these
+         * comments and the agent already has them. If nothing was waiting — the
+         * default, where the opener does not block — they still have to travel,
+         * so they go as a message instead. Either way the words arrive; only the
+         * route differs.
+         */
+        const delivered = (result.structuredContent as { delivered?: boolean } | undefined)
+          ?.delivered;
+        if (delivered !== true) {
+          await bridge.sendMessage(quotePassages(display, outgoing, note));
+        }
+
         clear();
         setRejected(true);
       } catch (cause) {

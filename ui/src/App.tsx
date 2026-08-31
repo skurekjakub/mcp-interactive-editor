@@ -134,7 +134,14 @@ export function App() {
 
   return (
     <div className="review">
-      <ProposalTag proposal={proposal} stats={stats} dryRun={state.dryRun} />
+      <ProposalTag
+        proposal={proposal}
+        stats={stats}
+        dryRun={state.dryRun}
+        canFullscreen={session.canFullscreen}
+        fullscreen={session.displayMode === "fullscreen"}
+        onToggleFullscreen={session.toggleFullscreen}
+      />
 
       <Findings findings={findings} onApplyFix={applyFix} />
 

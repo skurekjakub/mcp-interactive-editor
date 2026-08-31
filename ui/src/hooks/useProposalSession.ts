@@ -27,6 +27,12 @@ export interface ProposalSession {
   hostError: Error | null;
   /** Where the panel has got to, so a stall says which step it stalled on. */
   phase: "connecting" | "claiming" | "attaching" | "ready";
+  /** How the host is showing this panel right now. */
+  displayMode: "inline" | "fullscreen" | "pip";
+  /** Whether asking for fullscreen is worth offering at all. */
+  canFullscreen: boolean;
+  /** Ask the host to grow or shrink. It decides; the result is what it did. */
+  toggleFullscreen: () => void;
   failure: string | null;
   setFailure: (next: string | null) => void;
 }
@@ -51,6 +57,8 @@ export function useProposalSession(paused: boolean): ProposalSession {
   /** The path the opening tool was called with, from the arguments the host hands us. */
   const [openedPath, setOpenedPath] = useState<string | undefined>(undefined);
   const [phase, setPhase] = useState<ProposalSession["phase"]>("connecting");
+  const [displayMode, setDisplayMode] = useState<ProposalSession["displayMode"]>("inline");
+  const [availableModes, setAvailableModes] = useState<string[]>([]);
 
   // Only the first state to arrive fills the edit buffer. A later one must not:
   // by then the human may have typed, and their draft outranks a re-attach.
@@ -66,9 +74,18 @@ export function useProposalSession(paused: boolean): ProposalSession {
   }, []);
 
   const { app, isConnected, error } = useApp({
-    appInfo: { name: "interactive-editor", version: "0.4.2" },
-    capabilities: {},
+    appInfo: { name: "interactive-editor", version: "0.5.0" },
+    // Declaring these is what makes fullscreen offerable at all: a host will not
+    // grow a panel that never said it could handle being grown.
+    capabilities: { availableDisplayModes: ["inline", "fullscreen"] },
     onAppCreated: (instance) => {
+      const readContext = () => {
+        const ctx = instance.getHostContext();
+        if (ctx?.displayMode) setDisplayMode(ctx.displayMode);
+        setAvailableModes(ctx?.availableDisplayModes ?? []);
+      };
+      instance.onhostcontextchanged = readContext;
+
       // Arguments arrive before any result does — and now the result does not
       // arrive at all until the human has decided, because the opening call is
       // waiting on this panel. The path is how we find the proposal we are for.
@@ -87,6 +104,25 @@ export function useProposalSession(paused: boolean): ProposalSession {
   });
 
   useHostStyleVariables(app);
+
+  // The context is only populated once the handshake lands, so read it again
+  // when the connection settles rather than only when it changes.
+  useEffect(() => {
+    if (!app || !isConnected) return;
+    const ctx = app.getHostContext();
+    if (ctx?.displayMode) setDisplayMode(ctx.displayMode);
+    setAvailableModes(ctx?.availableDisplayModes ?? []);
+  }, [app, isConnected]);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!app) return;
+    const next = displayMode === "fullscreen" ? "inline" : "fullscreen";
+    void app
+      .requestDisplayMode({ mode: next })
+      // The host decides. Believe its answer, not the request.
+      .then((result) => setDisplayMode(result.mode))
+      .catch((cause: unknown) => setFailure(messageOf(cause)));
+  }, [app, displayMode]);
 
   const bridge: Bridge | null = useMemo(() => {
     if (IS_PREVIEW) return previewBridge();
@@ -206,6 +242,9 @@ export function useProposalSession(paused: boolean): ProposalSession {
     setAck,
     hostError: error,
     phase,
+    displayMode,
+    canFullscreen: availableModes.includes("fullscreen"),
+    toggleFullscreen,
     failure,
     setFailure,
   };

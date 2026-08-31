@@ -746,6 +746,14 @@ button {
   max-height: 140px;
 }
 
+/* Grow/shrink lives with the counts rather than in the pane controls: it is
+   about the window, not about which pane you are reading. */
+.tag-expand {
+  padding: 2px 6px;
+  font-size: 13px;
+  line-height: 1;
+}
+
 /* Which step the panel is on while it opens. Quiet, but present: a stall that
    names its step is a bug report, and a bare spinner is not. */
 .status-phase {

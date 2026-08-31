@@ -35,6 +35,21 @@ export interface ToolContext {
    * going to show one, whatever it advertised at initialize.
    */
   reviewGraceMs: number;
+  /**
+   * Whether an opening call waits for the human at all.
+   *
+   * Off by default, and that default is the result of a real failure. Holding
+   * the call open requires the host to keep dispatching tool calls while one is
+   * still outstanding — the panel has to claim its proposal and attach *during*
+   * the call that created it. The MCP server does exactly that (a plain client
+   * gets an answer in 4ms while an opener is open), but a host is free to
+   * serialise, and at least one does: the panel's calls never arrive, it sits on
+   * "Opening…", and the editor is unusable.
+   *
+   * A non-blocking editor is a smaller thing than a blocking one, and it works
+   * everywhere. Turn it on with --block-on-review where the host allows it.
+   */
+  blockOnReview: boolean;
 }
 
 /** The View every editor-opening tool points at. */

@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31
+
+### Changed
+
+- **Holding the tool call open is now opt-in, and off by default.** 0.4.0 made
+  every opening call wait for the human. It works — a plain MCP client gets an
+  answer from `editor_pending` in 4ms while `propose_write` is still open — but
+  it needs the _host_ to keep dispatching the panel's calls during the call that
+  created the panel, and the MCP Apps spec requires no such thing: "The Host MAY
+  forward any message from the View... it MAY decide to block some messages or
+  subject them to further user approval." At least one host does not forward
+  them in time. The panel never claims its proposal, sits on "Opening...", and
+  the editor is unusable.
+
+  A non-blocking editor is a smaller thing than a blocking one and it works
+  everywhere, so that is the default. `--block-on-review` turns the gate back on
+  where the host allows it.
+
+  MCP's own answer to "pause and ask the human" is elicitation, which the SDK
+  exposes as `server.elicitInput` and whose result is exactly `accept | decline
+| cancel`. It is not used here: elicitation renders the _client's_ form from a
+  JSON schema, so taking it would mean giving up the editor, which is the entire
+  product. The MCP Apps spec and the elicitation spec do not currently compose.
+
+- **Send always delivers.** It resolves the waiting call when there is one, and
+  posts the comments as a message when there is not, so the same button does the
+  right thing in both modes.
+
+### Added
+
+- **Fullscreen.** The panel now declares `availableDisplayModes` and offers a
+  toggle in the tag bar, which asks the host via `ui/request-display-mode` and
+  believes the answer rather than the request. The button is hidden entirely
+  where the host never offered the mode.
+
 ## [0.4.2] — 2026-08-31
 
 ### Fixed
@@ -257,7 +292,8 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.3.0...v0.4.0

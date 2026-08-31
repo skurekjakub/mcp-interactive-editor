@@ -4,13 +4,24 @@ interface ProposalTagProps {
   proposal: Proposal;
   stats: DiffStats;
   dryRun: boolean;
+  /** Hidden entirely when the host never offered fullscreen — see useProposalSession. */
+  canFullscreen: boolean;
+  fullscreen: boolean;
+  onToggleFullscreen: () => void;
 }
 
 /**
  * The lockout tag. It says what is being held, why, and how much of the file
  * moves — the three things you need before deciding whether to look closer.
  */
-export function ProposalTag({ proposal, stats, dryRun }: ProposalTagProps) {
+export function ProposalTag({
+  proposal,
+  stats,
+  dryRun,
+  canFullscreen,
+  fullscreen,
+  onToggleFullscreen,
+}: ProposalTagProps) {
   return (
     <div className="tag" data-state={proposal.target.absolute ? "held" : "refused"}>
       <span className="tag-state">{proposal.target.absolute ? "Held" : "Refused"}</span>
@@ -24,6 +35,17 @@ export function ProposalTag({ proposal, stats, dryRun }: ProposalTagProps) {
       <div className="tag-meta">
         <span className={stats.added ? "count-add" : "count-flat"}>+{stats.added}</span>
         <span className={stats.removed ? "count-cut" : "count-flat"}>−{stats.removed}</span>
+        {canFullscreen ? (
+          <button
+            type="button"
+            className="btn btn-quiet tag-expand"
+            onClick={onToggleFullscreen}
+            title={fullscreen ? "Back to inline" : "Take over the window"}
+            aria-label={fullscreen ? "Back to inline" : "Take over the window"}
+          >
+            {fullscreen ? "⤡" : "⤢"}
+          </button>
+        ) : null}
       </div>
     </div>
   );

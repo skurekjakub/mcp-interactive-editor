@@ -21,7 +21,10 @@ export async function waitForReview(
   proposalId: string,
   opened: CallToolResult,
 ): Promise<CallToolResult> {
-  if (!context.canRenderPanel()) return opened;
+  // Opt-in, and off by default: see ToolContext.blockOnReview. A host that will
+  // not dispatch the panel's calls during the opening call turns a review into a
+  // dead panel, which is worse than a review that does not block.
+  if (!context.blockOnReview || !context.canRenderPanel()) return opened;
 
   // Registered before the grace poll, so a panel that attaches and resolves
   // immediately cannot slip through the gap.

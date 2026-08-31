@@ -29404,7 +29404,7 @@ function errorResult(message) {
 
 // src/tools/awaitReview.ts
 async function waitForReview(context, proposalId, opened) {
-  if (!context.canRenderPanel()) return opened;
+  if (!context.blockOnReview || !context.canRenderPanel()) return opened;
   const settled = awaitReview(proposalId, context.reviewTimeoutMs);
   if (!await attachedWithin(proposalId, context.reviewGraceMs)) {
     resolveReview(proposalId, {
@@ -29833,6 +29833,7 @@ function registerTools(server, guard, options = { commitVisibility: ["app"] }) {
     terminalApproval: options.terminalApproval ?? false,
     reviewTimeoutMs: options.reviewTimeoutMs ?? REVIEW_TIMEOUT_MS,
     reviewGraceMs: options.reviewGraceMs ?? REVIEW_GRACE_MS,
+    blockOnReview: options.blockOnReview ?? false,
     canRenderPanel: () => hostRendersPanel(server)
   };
   registerEditorView(server);
@@ -29864,7 +29865,8 @@ function parseArgs(argv) {
     roots: [],
     deny: [...DEFAULT_DENY],
     dryRun: dryRunFromEnv(),
-    terminalApproval: false
+    terminalApproval: false,
+    blockOnReview: false
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -29874,6 +29876,8 @@ function parseArgs(argv) {
       cli.terminalApproval = true;
     } else if (arg === "--review-timeout-ms") {
       cli.reviewTimeoutMs = Number(argv[++i]);
+    } else if (arg === "--block-on-review") {
+      cli.blockOnReview = true;
     } else if (arg === "--review-grace-ms") {
       cli.reviewGraceMs = Number(argv[++i]);
     } else if (arg === "--root") {
@@ -29921,6 +29925,10 @@ Options:
   --terminal-approval          Expose the commit tool to the agent, for hosts that
                                cannot render the editor. You get your client's
                                approve/deny prompt instead of an editor. Weaker.
+  --block-on-review            Hold the opening call open until the human accepts or
+                               comments, so its result is the decision. Needs a host
+                               that dispatches the panel's calls while one is open;
+                               where it does not, the panel never loads. Off by default.
   --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
   --review-grace-ms <ms>       How long to wait for the panel to attach. Default 30000.
   -h, --help                   This.
@@ -29947,14 +29955,15 @@ ${HELP}`);
   const guard = new FsGuard({ roots: cli.roots, deny: cli.deny, dryRun: cli.dryRun });
   const commitVisibility = cli.terminalApproval ? ["model", "app"] : ["app"];
   const server = new McpServer(
-    { name: "interactive-editor", version: "0.4.2" },
+    { name: "interactive-editor", version: "0.5.0" },
     {
-      instructions: "propose_write opens an editable review panel and does not return until the human has decided. Accept with no comment and it commits, and the result is a receipt for what landed. Comment on it and that is a rejection: nothing is written, and the result carries their words quoted against the lines they are about \u2014 redraft from those and propose again rather than re-sending the same content. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves."
+      instructions: "propose_write opens an editable review panel: the human gets a live diff against disk, edits your draft in place, and either saves it or comments on it. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves.\n\nIt returns as soon as the panel is open. The outcome reaches you separately: a receipt if they saved, or their comments quoted against the lines they are about. Comments mean the draft was declined \u2014 nothing was written, so redraft from what they said rather than re-proposing the same content.\n\nStarted with --block-on-review, the call instead waits and its own result is the outcome."
     }
   );
   registerTools(server, guard, {
     commitVisibility,
     terminalApproval: cli.terminalApproval,
+    blockOnReview: cli.blockOnReview,
     ...cli.reviewTimeoutMs !== void 0 ? { reviewTimeoutMs: cli.reviewTimeoutMs } : {},
     ...cli.reviewGraceMs !== void 0 ? { reviewGraceMs: cli.reviewGraceMs } : {}
   });

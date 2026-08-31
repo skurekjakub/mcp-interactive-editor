@@ -51,6 +51,8 @@ export interface ToolOptions {
   reviewTimeoutMs?: number;
   /** How long to wait for a panel to attach. Defaults to REVIEW_GRACE_MS. */
   reviewGraceMs?: number;
+  /** Hold opening calls open until the human decides. Off unless asked for. */
+  blockOnReview?: boolean;
 }
 
 export function registerTools(
@@ -64,6 +66,7 @@ export function registerTools(
     terminalApproval: options.terminalApproval ?? false,
     reviewTimeoutMs: options.reviewTimeoutMs ?? REVIEW_TIMEOUT_MS,
     reviewGraceMs: options.reviewGraceMs ?? REVIEW_GRACE_MS,
+    blockOnReview: options.blockOnReview ?? false,
     canRenderPanel: () => hostRendersPanel(server),
   };
 
