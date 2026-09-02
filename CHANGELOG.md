@@ -747,7 +747,7 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.2...HEAD
 [0.7.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...v0.7.0
