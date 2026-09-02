@@ -50,7 +50,36 @@ export async function writeProposal(proposal: Proposal): Promise<void> {
   const target = recordPath("proposals", proposal.proposalId, RECORD_SUFFIX);
   const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temp, JSON.stringify(proposal), { encoding: "utf8", mode: 0o600 });
-  await rename(temp, target);
+  await replace(temp, target);
+}
+
+/** How many times a refused replace is tried again before it is given up on. */
+const REPLACE_ATTEMPTS = 10;
+
+/**
+ * Moves a file over another, waiting out a refusal caused by a sibling replace.
+ *
+ * Windows will not replace a file while another rename is replacing it, and
+ * answers EPERM rather than queueing. Two writes of one record landing together
+ * therefore lose one of them outright, though each would succeed alone. Linux
+ * and macOS serialise the replace themselves and never refuse.
+ *
+ * @param from - The file to move.
+ * @param to - Where it goes, replacing whatever is there.
+ * @returns A promise that settles once the move has happened.
+ * @throws {Error} When the move fails for any other reason, or keeps being refused.
+ */
+async function replace(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== "EPERM" && code !== "EACCES") || attempt >= REPLACE_ATTEMPTS) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 5 * attempt));
+    }
+  }
 }
 
 /**

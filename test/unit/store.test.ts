@@ -91,13 +91,19 @@ describe("records", () => {
     expect((await allProposals()).map((p) => p.proposalId)).toEqual([ID]);
   });
 
-  it("survives two writes of one record landing together", async () => {
+  it("survives writes of one record landing together", async () => {
     // Arrange & Act: the panel's debounced sync and its pre-commit flush can
-    // both be in flight at once, in one process, for one proposal.
-    await Promise.all([writeProposal(proposal(ID, "one")), writeProposal(proposal(ID, "two"))]);
+    // both be in flight at once, in one process, for one proposal. Windows
+    // refuses to replace a file another rename is replacing at that instant,
+    // and one pair collides only sometimes, so this lands enough of them that
+    // a writer which gives up on the first refusal cannot pass.
+    const contents = ["one", "two", "three", "four"];
+    for (let round = 0; round < 25; round++) {
+      await Promise.all(contents.map((c) => writeProposal(proposal(ID, c))));
+    }
 
     // Assert: whichever landed last is whole, and no temp file survives.
-    expect(["one", "two"]).toContain((await readProposal(ID))?.content);
+    expect(contents).toContain((await readProposal(ID))?.content);
     const leftovers = (await readdir(join(store, "proposals"))).filter((n) => !n.endsWith(".json"));
     expect(leftovers).toEqual([]);
   });
