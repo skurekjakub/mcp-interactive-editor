@@ -38,26 +38,20 @@ indistinguishable from "the restart did not work".
    release. Dispatch-only on purpose: releasing on a tag push makes the tag the
    decision, and a tag cannot be withdrawn once an install has resolved it. The
    workflow refuses a version the tree does not declare, one already tagged, and
-   one the changelog does not describe — then verifies, packs, writes
-   `server.json` from the artifact's hash, commits it, tags, and uploads.
+   one the changelog does not describe — then verifies, packs, tags, and
+   uploads the artifact with the changelog section and its checksum as the
+   release notes. Nothing is committed back to the branch.
 
-7. **`git pull`**, because the workflow committed `server.json` to the branch.
+## The tag lands on the commit that describes the release
 
-## Nothing about the release may be committed after the tag
+Anything that describes a release — the version, the changelog section — belongs
+in the commit the tag lands on, not after it. A tag pointing at a tree that
+disagrees with the release it names cannot be corrected once an install has
+resolved it.
 
-`server.json` names the artifact and its `fileSha256`, so it cannot be written
-before the artifact exists — and if it is written _after_ the tag, the tagged
-tree describes the **previous** release. Check out that tag and you get a
-`server.json` pointing at the old download with the old checksum, permanently.
-
-The workflow resolves it by doing everything in one run: pack, hash, write,
-commit, _then_ tag. If you ever release by hand, keep that order. The rule
-generalises — anything describing the release belongs in the commit the tag
-lands on, not after it.
-
-Packing is not reproducible (zip entries carry mtimes), so the hash must come
-from the artifact that is actually uploaded. A second local `npm run pack`
-produces a different file and therefore a checksum registry clients will reject.
+Packing is not reproducible (zip entries carry mtimes), so the checksum in the
+release notes is taken from the artifact that is actually uploaded. A second
+local `npm run pack` produces a different file and therefore a different hash.
 
 ## Cross-platform failures you will only see in CI
 

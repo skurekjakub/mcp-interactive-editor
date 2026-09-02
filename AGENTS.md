@@ -74,11 +74,6 @@ the `CHANGELOG.md` section, and:
 npm run verify && npm run bundle
 ```
 
-`server.json` is deliberately **not** bumped. It describes a published `.mcpb`
-with a `fileSha256`, so it should lag until that release actually exists —
-pointing it at a tag that was never cut makes the registry manifest wrong rather
-than merely stale.
-
 To pick a new version up locally: `claude plugin update interactive-editor`, then
 restart the host. `list_roots` reports the running server's version, which is the
 only way to confirm the update took.

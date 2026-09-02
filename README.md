@@ -430,7 +430,6 @@ test/e2e/        a real server over stdio, driven by an MCP client, run twice:
 docs/            the comment policy the build enforces
 scripts/         bundle, version bump, comment-policy checker
 .claude-plugin/  Claude Code plugin marketplace manifests
-server.json      MCP registry metadata
 ```
 
 `shared/` exists so the editor can recompute the diff and findings on every

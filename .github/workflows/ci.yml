@@ -131,11 +131,3 @@ jobs:
         with:
           name: bundle
           path: bundle/
-
-      - name: Report the extension checksum
-        # server.json pins fileSha256 for the published artifact, and registry
-        # clients verify it before installing.
-        run: |
-          sha=$(sha256sum dist/mcp-interactive-editor.mcpb | cut -d' ' -f1)
-          echo "### Extension checksum" >> "$GITHUB_STEP_SUMMARY"
-          echo '`'"$sha"'`' >> "$GITHUB_STEP_SUMMARY"
