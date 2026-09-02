@@ -133,8 +133,5 @@ execFileSync(
 
 process.stdout.write(
   `${current} -> ${next}\n${planned.map((p) => `  ${p.rel}`).join("\n")}\n\n` +
-    "server.json is not touched here. It describes a published .mcpb with a\n" +
-    "checksum, so it moves only when you actually cut the release — update its\n" +
-    "version, identifier URL and fileSha256 from the artifact you upload.\n\n" +
     "Next: add the CHANGELOG.md section, then `npm run verify`.\n",
 );

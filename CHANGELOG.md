@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **`server.json`, the MCP registry manifest.** The server was never listed,
+  and the registry has no way to say that the editor needs a host that renders
+  MCP Apps, so a listing would have promised a panel most clients cannot show.
+  Releases no longer commit a checksum back to the branch; it is in the release
+  notes instead.
+
 ## [0.7.2] - 2026-09-02
 
 ### Fixed
