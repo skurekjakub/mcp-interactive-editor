@@ -23,6 +23,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Every dependency moved to its current release**, including Vite, Vitest,
+  ESLint and esbuild, and Zod to 4. TypeScript stays on 5 for now: the
+  type-aware ESLint rules that guard the paths writing to disk do not support 7
+  yet, and dropping them to move the compiler is the wrong trade.
+- **Node and npm are no longer pinned to one version each.** The lockfile split
+  between npm majors because a nested Vite wanted an esbuild the root copy was
+  too old to provide; with the root current, the peer resolves and a lockfile
+  written by either major installs under both.
 - **The editor is taller, and fullscreen finally means it.** The panes were
   capped at 420px whatever the window did, so pressing fullscreen widened the
   panel and left the editor its usual few hundred pixels with dead space
