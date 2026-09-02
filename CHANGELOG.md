@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-31
+
+### Fixed
+
+- **"Send the comments instead" did nothing.** After commenting on a highlight
+  the commit button relabelled itself as the send — while staying disabled and
+  still wired to the commit. It was the only action left on screen and it could
+  not be performed, so a review with comments on it had no way forward but
+  discarding. The button now sends, and it says which highlight is still waiting
+  when one of them has no comment yet, rather than sitting there refusing
+  silently.
+- **The message about all the highlights together could be dropped.** It was
+  held by the bar that draws the box, so a send started from anywhere else
+  carried an empty one and the typed paragraph went nowhere without saying so.
+
+### Changed
+
+- **The editor is taller, and fullscreen finally means it.** The panes were
+  capped at 420px whatever the window did, so pressing fullscreen widened the
+  panel and left the editor its usual few hundred pixels with dead space
+  underneath. Fullscreen now uses the height it was given, and the inline cap is
+  800px. The compact editor that "diff" leaves behind keeps its own size.
+
 ## [0.7.0] - 2026-08-31
 
 ### Fixed
@@ -662,6 +685,7 @@ First cut.
   MCP registry.
 
 [Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...HEAD
+[0.7.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.5.2...v0.6.1

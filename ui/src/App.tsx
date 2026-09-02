@@ -139,7 +139,7 @@ export function App() {
   const unchanged = !isDelete && content === proposal.baseline && proposal.target.exists;
 
   return (
-    <div className="review">
+    <div className="review" data-display={session.displayMode}>
       {state.serverVersion !== PANEL_VERSION ? (
         /*
          * Two installs, two update cycles. When they drift the behaviour matches
@@ -197,6 +197,8 @@ export function App() {
           sending={tray.sending}
           onAnnotate={tray.annotate}
           onRemove={tray.unpin}
+          note={tray.note}
+          onNoteChange={tray.setNote}
           onSend={tray.send}
           onDismiss={tray.clear}
         />
@@ -209,7 +211,13 @@ export function App() {
         isDelete={isDelete}
         blocked={hasBlockers(findings)}
         hasComments={tray.outgoing.some(isAnswered)}
-        busy={busy}
+        commentsIncomplete={tray.outgoing.some((passage) => !isAnswered(passage))}
+        onSendComments={() => void tray.send()}
+        // Both actions this button can perform are in flight-able, so both have
+        // to disable it. Watching only the commit leaves a second press during a
+        // send resolving one proposal twice, and the failure lands on a screen
+        // the send has already replaced.
+        busy={busy || tray.sending}
         // Attaching is what unlocks the commit tool server-side, so a panel that
         // never attached must not offer a button the server will refuse.
         writable={proposal.target.absolute !== null && state.proposal.attached}

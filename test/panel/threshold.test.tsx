@@ -28,6 +28,8 @@ const CLEAR = {
   writable: true,
   unchanged: false,
   label: "Write 3 lines to deploy.yml",
+  commentsIncomplete: false,
+  onSendComments: () => {},
   onCommit: () => {},
   onDiscard: () => {},
 };
@@ -103,13 +105,46 @@ describe("the one-way door", () => {
     expect(commit.textContent).toMatch(/no changes/i);
   });
 
-  it("stays shut once a comment declines the draft", () => {
+  it("becomes the send once a comment declines the draft", () => {
     // Act.
     const commit = commitButton({ hasComments: true });
 
-    // Assert: commenting is declining, so the two are exclusive.
-    expect(commit.disabled).toBe(true);
+    // Assert: commenting is declining, so committing is gone — but the button
+    // offering the only remaining action has to perform it. Labelled as the send
+    // and disabled, it was the one press that could do nothing.
+    expect(commit.disabled).toBe(false);
     expect(commit.textContent).toMatch(/send the comments/i);
+  });
+
+  it("sends the comments rather than committing them", () => {
+    // Arrange.
+    const onSendComments = vi.fn();
+    const onCommit = vi.fn();
+
+    // Act.
+    fireEvent.click(commitButton({ hasComments: true, onSendComments, onCommit }));
+
+    // Assert.
+    expect(onSendComments).toHaveBeenCalledOnce();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("shuts while a send is already in flight", () => {
+    // A second press during the round trip resolves one proposal twice, and the
+    // failure lands on a screen the first send has already replaced.
+    const commit = commitButton({ hasComments: true, busy: true });
+
+    expect(commit.disabled).toBe(true);
+  });
+
+  it("says which door is shut while a highlight has no comment yet", () => {
+    // Act.
+    const commit = commitButton({ hasComments: true, commentsIncomplete: true });
+
+    // Assert: the send refuses a half-answered tray and committing is already
+    // gone. Silence here leaves both shut with nothing saying which to open.
+    expect(commit.disabled).toBe(true);
+    expect(commit.textContent).toMatch(/comment on every highlight/i);
   });
 
   it("hands the press through when it opens", () => {

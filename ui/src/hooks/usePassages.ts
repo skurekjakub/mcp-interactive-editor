@@ -29,7 +29,16 @@ export interface PassageTray {
   annotate: (id: string, note: string) => void;
   unpin: (id: string) => void;
   clear: () => void;
-  send: (note: string) => Promise<void>;
+  /**
+   * The optional message about the highlights as a whole.
+   *
+   * Owned here rather than by the bar that renders the box, because more than
+   * one control sends. A sender holding its own copy sends an empty one, and the
+   * paragraph the human typed goes nowhere without saying so.
+   */
+  note: string;
+  setNote: (next: string) => void;
+  send: () => Promise<void>;
   sending: boolean;
   /** Set once the comments have gone back and the draft has been declined. */
   rejected: boolean;
@@ -60,6 +69,7 @@ export function usePassages(
 ): PassageTray {
   const [pending, setPending] = useState<Passage | null>(null);
   const [passages, setPassages] = useState<Passage[]>([]);
+  const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
   const [rejected, setRejected] = useState(false);
 
@@ -78,52 +88,51 @@ export function usePassages(
   }, []);
 
   /** The comment for one highlight. Each carries its own; sending waits for all. */
-  const annotate = useCallback((id: string, note: string) => {
-    setPassages((current) => annotatePassage(current, id, note));
+  const annotate = useCallback((id: string, comment: string) => {
+    setPassages((current) => annotatePassage(current, id, comment));
   }, []);
 
   const clear = useCallback(() => {
     setPending(null);
     setPassages([]);
+    setNote("");
   }, []);
 
-  const send = useCallback(
-    async (note: string) => {
-      if (!bridge || !display || !proposalId) return;
-      if (outgoing.length === 0 || unanswered(outgoing).length > 0) return;
+  const send = useCallback(async () => {
+    if (!bridge || !display || !proposalId) return;
+    if (outgoing.length === 0 || unanswered(outgoing).length > 0) return;
 
-      setSending(true);
-      onFailure(null);
-      try {
-        const sent = await call(bridge, "editor_request_changes", {
-          proposalId,
-          message: quotePassages(display, outgoing, note),
-        });
-        if (sent.refusal) {
-          onFailure(sent.refusal);
-          return;
-        }
-
-        /*
-         * If an opening call was waiting, it has just returned with these
-         * comments and the agent already has them. If nothing was waiting they
-         * still have to travel, so they go as a message instead. Either way the
-         * words arrive; only the route differs.
-         */
-        if (!deliveredIn(sent.result)) {
-          await bridge.sendMessage(quotePassages(display, outgoing, note));
-        }
-
-        clear();
-        setRejected(true);
-      } catch (cause) {
-        onFailure(messageOf(cause));
-      } finally {
-        setSending(false);
+    const outbound = note.trim();
+    setSending(true);
+    onFailure(null);
+    try {
+      const sent = await call(bridge, "editor_request_changes", {
+        proposalId,
+        message: quotePassages(display, outgoing, outbound),
+      });
+      if (sent.refusal) {
+        onFailure(sent.refusal);
+        return;
       }
-    },
-    [bridge, proposalId, display, outgoing, clear, onFailure],
-  );
+
+      /*
+       * If an opening call was waiting, it has just returned with these
+       * comments and the agent already has them. If nothing was waiting they
+       * still have to travel, so they go as a message instead. Either way the
+       * words arrive; only the route differs.
+       */
+      if (!deliveredIn(sent.result)) {
+        await bridge.sendMessage(quotePassages(display, outgoing, outbound));
+      }
+
+      clear();
+      setRejected(true);
+    } catch (cause) {
+      onFailure(messageOf(cause));
+    } finally {
+      setSending(false);
+    }
+  }, [bridge, proposalId, display, outgoing, note, clear, onFailure]);
 
   return {
     pending,
@@ -134,6 +143,8 @@ export function usePassages(
     annotate,
     unpin,
     clear,
+    note,
+    setNote,
     send,
     sending,
     rejected,

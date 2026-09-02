@@ -31831,7 +31831,7 @@ async function readTombstone(proposalId) {
 }
 
 // src/version.ts
-var SERVER_VERSION = "0.7.0";
+var SERVER_VERSION = "0.7.1";
 
 // src/proposals.ts
 var MAX_RETAINED = 32;
@@ -32039,7 +32039,7 @@ function describeCommit(receipt) {
 }
 
 // src/tools/awaitReview.ts
-var ATTACH_POLL_MS = 25;
+var ATTACH_POLL_MS = 100;
 async function waitForReview(context, proposalId, opened) {
   if (!context.blockOnReview || !context.canRenderPanel()) return opened;
   const settled = awaitReview(proposalId, context.reviewTimeoutMs);

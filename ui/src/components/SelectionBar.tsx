@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { basename } from "../lib/labels.js";
 import {
   isAnswered,
@@ -29,7 +29,10 @@ interface SelectionBarProps {
   onAttach: (passage: Passage) => void;
   onAnnotate: (id: string, note: string) => void;
   onRemove: (id: string) => void;
-  onSend: (note: string) => Promise<void>;
+  /** The message about all the highlights, held by the tray so every sender shares it. */
+  note: string;
+  onNoteChange: (next: string) => void;
+  onSend: () => Promise<void>;
   onDismiss: () => void;
 }
 
@@ -56,11 +59,11 @@ export function SelectionBar({
   onAttach,
   onAnnotate,
   onRemove,
+  note,
+  onNoteChange,
   onSend,
   onDismiss,
 }: SelectionBarProps) {
-  const [note, setNote] = useState("");
-
   const ordered = sortPassages(passages);
   // Counted over what will actually be sent, so the "still needs a comment"
   // warning cannot disagree with what the send does.
@@ -71,11 +74,9 @@ export function SelectionBar({
 
   const submit = async () => {
     if (sending || blocked) return;
-    const outbound = note.trim();
-    // Clear only once it has gone. A refused send that has already emptied the
-    // box loses a typed paragraph with no way to recover it.
-    await onSend(outbound);
-    setNote("");
+    // The tray clears the box only once the send has gone. A refused send that
+    // had already emptied it loses a typed paragraph with no way to recover it.
+    await onSend();
   };
 
   return (
@@ -135,7 +136,7 @@ export function SelectionBar({
           value={note}
           placeholder="Anything that applies to all of them? Optional."
           aria-label="An optional message about all the highlights together"
-          onChange={(event) => setNote(event.target.value)}
+          onChange={(event) => onNoteChange(event.target.value)}
           disabled={sending}
         />
         <button
