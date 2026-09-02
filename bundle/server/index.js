@@ -39659,7 +39659,20 @@ async function writeProposal(proposal) {
   const target = recordPath("proposals", proposal.proposalId, RECORD_SUFFIX);
   const temp = `${target}.${process.pid}.${randomUUID2()}.tmp`;
   await writeFile2(temp, JSON.stringify(proposal), { encoding: "utf8", mode: 384 });
-  await rename2(temp, target);
+  await replace(temp, target);
+}
+var REPLACE_ATTEMPTS = 10;
+async function replace(from, to) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename2(from, to);
+      return;
+    } catch (error61) {
+      const code = error61.code;
+      if (code !== "EPERM" && code !== "EACCES" || attempt >= REPLACE_ATTEMPTS) throw error61;
+      await new Promise((resolve4) => setTimeout(resolve4, 5 * attempt));
+    }
+  }
 }
 async function allProposals() {
   let names;
@@ -39716,7 +39729,7 @@ async function pruneTombstones(now = Date.now()) {
 }
 
 // src/version.ts
-var SERVER_VERSION = "0.7.2";
+var SERVER_VERSION = "0.7.3";
 
 // src/proposals.ts
 var MAX_RETAINED = 32;

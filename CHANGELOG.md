@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-02
+
+### Fixed
+
+- **On Windows, saving could still fail with "Could not send your edits to the
+  server" when two saves landed together.** Each write had its own temp file,
+  but both then moved it over the same record at the same instant, and Windows
+  refuses the second move rather than waiting for the first. A refused move is
+  tried again.
+
 ### Removed
 
 - **`server.json`, the MCP registry manifest.** The server was never listed,
@@ -755,7 +765,8 @@ First cut.
   Code plugin marketplace, a VS Code install deeplink, and `server.json` for the
   MCP registry.
 
-[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...v0.7.0

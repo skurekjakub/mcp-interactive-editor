@@ -7,4 +7,4 @@
  * installs on separate update cycles, and a panel talking to a different build
  * misbehaves in ways that point nowhere near the cause.
  */
-export const SERVER_VERSION = "0.7.2";
+export const SERVER_VERSION = "0.7.3";
