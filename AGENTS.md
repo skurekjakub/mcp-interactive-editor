@@ -134,13 +134,15 @@ That symptom is indistinguishable from a server restart, and the message used to
 say so, which sent everyone to restart an app that was working fine. It is a host
 bug, reported and closed unfixed, so this server has to survive it.
 
-Proposals live in `src/store.ts`, a directory under `tmpdir()` named for a hash of
-the settings the server was started with. Two siblings spawned from one host entry
-were given identical arguments, so they hash to the same directory and meet there.
-Servers started against different roots hash differently and stay apart — that
-part is load-bearing rather than tidy: a shared store across roots would let a
-server claim, and then write, a proposal for a directory it was never allowed to
-touch.
+Proposals live in the store — `src/store.ts` decides where it is and which files
+an id may name; the records, commit claims and tombstones each have a module
+under `src/store/`. It is a directory under `tmpdir()`, inside a parent named for
+the account running the server, named for a hash of the settings the server was
+started with. Two siblings spawned from one host entry were given identical
+arguments, so they hash to the same directory and meet there. Servers started
+against different roots hash differently and stay apart — that part is
+load-bearing rather than tidy: a shared store across roots would let a server
+claim, and then write, a proposal for a directory it was never allowed to touch.
 
 Two consequences for anything you add:
 
@@ -194,11 +196,12 @@ proposal with a real diff and the bridge stub, and can be driven with `fireEvent
 `isPreview()` is a function rather than a constant so a test can drive the host
 path with a stub bridge instead.
 
-The e2e suite runs against `dist/` and against a **copy of `bundle/` placed
-outside the repository**. The copy is the point: run in place and
+The e2e suites — one file per concern under `test/e2e/`, sharing
+`test/e2e/harness.ts` — run against `dist/` and against a **copy of `bundle/`
+placed outside the repository**. The copy is the point: run in place and
 `../../dist/ui/index.html` resolves onto the real panel, so a server that had
 lost the flat-layout candidate would still pass while the shipped `.mcpb` served
-nothing. It also runs both the blocking and the default non-blocking mode,
+nothing. They also run both the blocking and the default non-blocking mode,
 because only the second is what any install actually gets.
 
 It also spawns **two servers against one root** and drives the proposal from one
@@ -211,10 +214,17 @@ processes can tell the difference.
 compares them at runtime and says so on screen when they disagree — the two
 installs have separate update cycles and genuinely do drift.
 
-- Pure logic shared by both builds → `shared/` (`passages.ts`, `diff.ts`, `lint.ts`)
-- Pure logic for the server → `src/`, e.g. `src/tools/wording.ts`
+- Pure logic shared by both builds → `shared/` (`passages.ts`, `diff.ts`,
+  `unifiedDiff.ts`, and `lint.ts` composing one rule module per family under
+  `shared/lint/`)
+- Pure logic for the server → `src/`, e.g. `src/tools/wording.ts`, the deny
+  matcher in `src/fs/deny.ts`, and the path-spelling comparison in
+  `src/pathSpelling.ts`; `FsGuard` is the thin wrapper that puts a filesystem
+  under them
 - Pure logic for the panel → `ui/src/lib/`, which is pure **by rule** — keep the
-  DOM out of it, and do not import the bridge module from there
+  DOM out of it, and do not import the bridge module from there. The claim and
+  attach round trips live there as `handshake.ts`, driven by a stub caller and a
+  fake clock under test; the hooks only turn their outcomes into state
 - Anything touching a boundary is a thin wrapper around a pure unit. `DiffPane`
   reads the live selection off the DOM and hands rows to `passageFromRows`; the
   arithmetic is tested, the wrapper is three lines.

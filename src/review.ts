@@ -1,5 +1,3 @@
-import type { ReviewOutcome } from "../shared/types.js";
-
 /**
  * @module
  *
@@ -9,7 +7,12 @@ import type { ReviewOutcome } from "../shared/types.js";
  * `--block-on-review`: the opening call returns what happened in the editor
  * rather than the fact that it opened. The agent learns that its draft was
  * rejected, and why, in the result of the call it already made.
+ *
+ * A blocking wait is a promise held by the process that must return, so this is
+ * the one piece of state that lives in memory rather than in the store: only the
+ * process the opening call landed on can end it.
  */
+import type { ReviewOutcome } from "../shared/types.js";
 
 /** Long enough to actually read a diff, short enough that a walked-away review ends. */
 export const REVIEW_TIMEOUT_MS = 10 * 60 * 1000;

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { countLines } from "../../shared/diff.js";
 import { composeState } from "../../shared/state.js";
-import { DESTRUCTIVE_DELETION_RATIO, hasBlockers } from "../../shared/lint.js";
+import { hasBlockers } from "../../shared/lint.js";
+import { DESTRUCTIVE_DELETION_RATIO } from "../../shared/lint/destructive.js";
 import type { Proposal, WriteMode } from "../../shared/types.js";
 
 function proposal(overrides: Partial<Proposal> = {}): Proposal {
@@ -107,6 +108,12 @@ describe("path checks", () => {
     );
     expect(findings.find((f) => f.id === "path-traversal")?.severity).toBe("info");
   });
+
+  it("does not mistake consecutive dots in a file name for a traversal", () => {
+    const named = proposal({ content: "x\n", target: { requested: "src/notes..md" } as never });
+
+    expect(ids(named)).not.toContain("path-traversal");
+  });
 });
 
 describe("destructive changes", () => {
@@ -187,6 +194,16 @@ describe("content hygiene", () => {
       (f) => f.id === "no-final-newline",
     );
     expect(finding?.fix?.content).toBe("no newline\n");
+  });
+
+  it("adds the terminator the content already uses", () => {
+    // Arrange & Act: CRLF content. A bare LF here would resolve this finding by
+    // raising the mixed-endings one.
+    const fixed = lint(proposal({ content: "a\r\nb" })).find((f) => f.id === "no-final-newline");
+
+    // Assert.
+    expect(fixed?.fix?.content).toBe("a\r\nb\r\n");
+    expect(ids(proposal({ content: fixed?.fix?.content ?? "" }))).not.toContain("mixed-eol");
   });
 
   it("does not complain about an empty file having no newline", () => {
@@ -282,6 +299,18 @@ describe("changes the diff cannot show", () => {
     );
 
     expect(finding?.severity).toBe("info");
+    expect(finding?.message).toMatch(/^Only the newline/);
+  });
+
+  it("does not claim the newline is the only change when other lines move too", () => {
+    // Arrange & Act: a line changes and the terminator changes with it.
+    const finding = lint(proposal({ baseline: "a\nb", content: "a\nB\n" })).find(
+      (f) => f.id === "newline-at-eof",
+    );
+
+    // Assert: the diff shows the line; the finding must not say nothing differs.
+    expect(finding?.message).toMatch(/as well/);
+    expect(finding?.detail).not.toMatch(/No line differs/);
   });
 });
 

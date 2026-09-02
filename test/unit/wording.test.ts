@@ -7,6 +7,7 @@ import {
   describeState,
   diffForModel,
   handleFor,
+  serverInstructions,
 } from "../../src/tools/wording.js";
 
 function stateFor(
@@ -130,6 +131,25 @@ describe("describeState", () => {
   it("says a directory is a directory", () => {
     const text = describeState(stateFor("", "x", { absolute: null, rejection: "not-a-file" }));
     expect(text).toMatch(/is a directory/);
+  });
+});
+
+describe("serverInstructions", () => {
+  it("does not promise a wait on a server that returns at once", () => {
+    // Assert: the instructions and the tool descriptions reach the model as one
+    // account, and one of them promising a verdict when the other delivers a
+    // diff tells the model its next observation is something it is not.
+    const text = serverInstructions({ blockOnReview: false });
+
+    expect(text).toMatch(/returns as soon as the panel is open/i);
+    expect(text).not.toMatch(/does not return until/i);
+  });
+
+  it("promises the wait when the server blocks on the review", () => {
+    const text = serverInstructions({ blockOnReview: true });
+
+    expect(text).toMatch(/does not return until/i);
+    expect(text).not.toMatch(/returns as soon as/i);
   });
 });
 

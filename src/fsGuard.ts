@@ -1,57 +1,29 @@
-import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import {
-  access,
-  chmod,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { PathRejection, TargetInfo } from "../shared/types.js";
-import { countLines } from "../shared/diff.js";
-
 /**
- * Settings that decide which paths may be touched at all.
+ * @module
+ *
+ * Resolution, containment and the only code in the server that writes.
  *
  * The rule is deliberately dumb and checkable: a path is writable only if, once
  * fully resolved (symlinks included), it sits inside one of the roots the server
  * was started with. There is no "unless", no escape hatch, and no flag that
  * turns it off — a review panel that can be talked past is not a review panel.
  */
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import type { PathRejection, TargetInfo } from "../shared/types.js";
+import { countLines } from "../shared/diff.js";
+import { matchDeny } from "./fs/deny.js";
+import { contains, realpathDeepest, toPosix } from "./fs/paths.js";
+import { sha256 } from "./hash.js";
+
+/** Settings that decide which paths may be touched at all. */
 export interface GuardOptions {
   roots: string[];
   /** Patterns that disqualify a path, matched against the root-relative form. */
   deny: string[];
   dryRun: boolean;
 }
-
-/**
- * Paths refused before any content is considered.
- *
- * A pattern ending in `/` matches a directory segment. A pattern beginning with
- * `.` matches a whole filename, a filename with a suffix after it, or an
- * extension. Anything else matches a whole filename. Matching is anchored rather
- * than by substring, so `shortcuts.keymap.ts` is not caught by `.key`.
- */
-export const DEFAULT_DENY = [
-  ".git/",
-  "node_modules/",
-  ".env",
-  ".ssh/",
-  "id_rsa",
-  ".pem",
-  ".key",
-  ".p12",
-  ".pfx",
-  "credentials",
-  ".aws/",
-  ".npmrc",
-];
 
 /**
  * Largest file the editor will load, in bytes.
@@ -74,7 +46,7 @@ class PathRejected extends Error {
   }
 }
 
-/** Resolution, containment and the only code in the server that writes. */
+/** Resolves paths against the roots, and performs every write the server makes. */
 export class FsGuard {
   readonly roots: string[];
   readonly dryRun: boolean;
@@ -88,7 +60,7 @@ export class FsGuard {
       );
     }
     this.roots = options.roots.map((r) => resolve(r));
-    this.deny = options.deny.map((d) => d.toLowerCase());
+    this.deny = [...options.deny];
     this.dryRun = options.dryRun;
   }
 
@@ -168,7 +140,7 @@ export class FsGuard {
     if (!root) return rejected("outside-roots");
 
     const rel = relative(root, real);
-    const deniedBy = this.deniedBy(rel);
+    const deniedBy = matchDeny(this.deny, toPosix(rel));
     if (deniedBy) return rejected("denied", deniedBy);
 
     let exists = false;
@@ -200,39 +172,6 @@ export class FsGuard {
       exists,
       onDisk,
     };
-  }
-
-  /**
-   * Reports which deny pattern refuses a path, if any.
-   *
-   * @param relativePath - Path relative to the root that contains it.
-   * @returns The matching pattern, or null when nothing matched.
-   */
-  private deniedBy(relativePath: string): string | null {
-    const normalised = toPosix(relativePath).toLowerCase();
-    if (normalised.startsWith("../")) return "..";
-
-    const segments = normalised.split("/");
-    const name = segments[segments.length - 1] ?? "";
-    const directories = segments.slice(0, -1);
-
-    for (const pattern of this.deny) {
-      if (pattern === "") continue;
-      if (pattern.endsWith("/")) {
-        if (directories.includes(pattern.slice(0, -1))) return pattern;
-        continue;
-      }
-      if (pattern.startsWith(".")) {
-        // A dot pattern is both a filename and an extension: `.env` catches
-        // `.env` and `.env.local`, `.pem` catches `server.pem`.
-        if (name === pattern || name.startsWith(`${pattern}.`) || name.endsWith(pattern)) {
-          return pattern;
-        }
-        continue;
-      }
-      if (name === pattern || name.startsWith(`${pattern}.`)) return pattern;
-    }
-    return null;
   }
 
   /**
@@ -306,69 +245,4 @@ export class FsGuard {
     if (this.dryRun) return;
     await rm(absolute, { force: true });
   }
-}
-
-/**
- * Hashes text with SHA-256.
- *
- * @param text - The content to hash.
- * @returns The digest as lowercase hex.
- */
-export function sha256(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
-}
-
-/**
- * Reports whether one path contains another.
- *
- * @param parent - The containing directory.
- * @param child - The path being tested.
- * @returns True when `child` is `parent` itself or sits underneath it.
- */
-function contains(parent: string, child: string): boolean {
-  if (parent === child) return true;
-  const rel = relative(parent, child);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-}
-
-/**
- * Resolves symlinks on the deepest ancestor of a path that exists.
- *
- * `realpath` throws on a path that does not exist yet, which is the normal case
- * for a file about to be created, so the existing prefix is resolved and the
- * missing tail re-appended.
- *
- * @param target - The path to resolve.
- * @returns The canonical path.
- * @throws {Error} When no ancestor of the path can be resolved.
- */
-async function realpathDeepest(target: string): Promise<string> {
-  const missing: string[] = [];
-  let current = target;
-
-  for (;;) {
-    try {
-      await access(current, constants.F_OK);
-      const resolved = await realpath(current);
-      return missing.length === 0 ? resolved : join(resolved, ...missing.reverse());
-    } catch {
-      const parent = dirname(current);
-      if (parent === current) throw new Error(`Cannot resolve ${target}`);
-      // `basename`, not a slice past the parent: a filesystem root already ends
-      // with its separator, so measuring one past it drops the first character
-      // of the segment — and the write lands on a path nobody asked for.
-      missing.push(basename(current));
-      current = parent;
-    }
-  }
-}
-
-/**
- * Rewrites a path with forward slashes.
- *
- * @param p - A path in the platform's own spelling.
- * @returns The same path with `/` separators.
- */
-function toPosix(p: string): string {
-  return p.split(sep).join("/");
 }

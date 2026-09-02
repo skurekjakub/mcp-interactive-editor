@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseArgs } from "../../src/cli.js";
-import { DEFAULT_DENY } from "../../src/fsGuard.js";
+import { DEFAULT_DENY } from "../../src/fs/deny.js";
 
 /** A parse with the world pinned, so no case depends on where it was run. */
 function parse(argv: string[], env: NodeJS.ProcessEnv = {}) {
@@ -39,21 +39,43 @@ describe("a flag that takes a value", () => {
   it("still reports a negative duration as a duration problem", () => {
     // A leading dash on a number is not a misplaced flag, so the message should
     // name the real fault rather than suggesting the inline form.
-    expect(() => parse(["--review-timeout-ms", "-5"])).toThrow(/positive number of milliseconds/);
+    expect(() => parse(["--review-timeout-ms", "-5"])).toThrow(
+      /positive whole number of milliseconds/,
+    );
+  });
+
+  it("refuses a fractional duration", () => {
+    expect(() => parse(["--review-grace-ms", "250.5"])).toThrow(/whole number/);
   });
 });
 
 describe("roots", () => {
-  it("resolves a bare positional argument", () => {
+  it("resolves a bare positional argument against the given working directory", () => {
+    // Arrange & Act: the environment names the directory, so the answer cannot
+    // depend on where the test runner happens to have been started.
     const cli = parse(["some/dir"]);
 
-    expect(cli.roots).toEqual([resolve("some/dir")]);
+    // Assert.
+    expect(cli.roots).toEqual([resolve("/work", "some/dir")]);
   });
 
   it("expands a leading tilde against the given home", () => {
     const cli = parse(["--root", "~/projects"]);
 
     expect(cli.roots).toEqual([resolve("/home/me", "projects")]);
+  });
+
+  it("expands a bare tilde to the home directory itself", () => {
+    expect(parse(["--root", "~"]).roots).toEqual([resolve("/home/me")]);
+  });
+
+  it("leaves another account's tilde alone rather than guessing at its home", () => {
+    // Arrange & Act: `~alice/x` is a different directory in a shell, and a root
+    // silently moved into this user's home is a root nobody asked for.
+    const cli = parse(["--root", "~alice/projects"]);
+
+    // Assert.
+    expect(cli.roots).toEqual([resolve("/work", "~alice/projects")]);
   });
 
   it("adds the given working directory for --root-from-cwd", () => {
@@ -111,7 +133,9 @@ describe("the rest of the surface", () => {
   });
 
   it("refuses a timing value that is not a number", () => {
-    expect(() => parse(["--review-timeout-ms=soon"])).toThrow(/positive number of milliseconds/);
+    expect(() => parse(["--review-timeout-ms=soon"])).toThrow(
+      /positive whole number of milliseconds/,
+    );
   });
 
   it("leaves the weakening flags off unless asked", () => {
@@ -148,8 +172,8 @@ describe("choosing a transport", () => {
     expect(cli).toMatchObject({ http: true, httpPort: 4000 });
   });
 
-  it("refuses a port that is not a number", () => {
-    expect(() => parse(["--http-port=eight"])).toThrow(/positive number/);
+  it("refuses a port that is not a number, and says it is the port", () => {
+    expect(() => parse(["--http-port=eight"])).toThrow(/--http-port needs a port number/);
   });
 
   it("allows the reference host and inspector origins out of the box", () => {

@@ -8,7 +8,7 @@
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { DEFAULT_DENY } from "./fsGuard.js";
+import { DEFAULT_DENY } from "./fs/deny.js";
 
 /** Everything the command line can decide. */
 export interface Cli {
@@ -89,24 +89,32 @@ function nextValue(flag: string, argv: string[], index: number): string {
 }
 
 /**
- * Reads a positive-integer flag value.
+ * Reads a positive whole-number flag value.
  *
  * An unvalidated `Number()` turns a typo into `NaN`, and every comparison
  * against `NaN` is false — so a mistyped timing flag disables the wait it was
- * meant to configure and reports the timeout as "within NaN minutes".
+ * meant to configure and reports the timeout as "within NaN minutes". A
+ * fraction is refused for the same reason: a port of 3001.5 is not a port.
  *
  * @param flag - The flag name, for the error message.
  * @param raw - The argument that followed it, if any.
+ * @param what - What the number is, for the error message.
  * @returns The parsed number.
- * @throws {Error} When the value is missing, not a number, or not positive.
+ * @throws {Error} When the value is missing, not a whole number, or not positive.
  */
-function positiveInt(flag: string, raw: string | undefined): number {
+function positiveInteger(flag: string, raw: string | undefined, what: string): number {
   const value = Number(raw);
-  if (raw === undefined || raw === "" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(`${flag} needs a positive number of milliseconds, got ${raw ?? "nothing"}`);
+  if (raw === undefined || raw === "" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`${flag} needs ${what}, got ${raw ?? "nothing"}`);
   }
   return value;
 }
+
+/** How a timing flag's value is described when it is refused. */
+const MILLISECONDS = "a positive whole number of milliseconds";
+
+/** How the port flag's value is described when it is refused. */
+const PORT = "a port number";
 
 /**
  * Reads the value attached to a `--flag=value` argument.
@@ -131,12 +139,19 @@ function inlineValue(flag: string, arg: string): string {
 /**
  * Expands a leading `~` and resolves the path.
  *
+ * Only a bare `~` or `~/` is the home directory. `~alice/x` names another
+ * account's home in a shell, which is not something to guess at: it is left as
+ * written and resolved as an ordinary relative path.
+ *
  * @param p - A path, possibly relative or home-relative.
  * @param home - The home directory to expand against.
+ * @param cwd - The directory a relative path is resolved against.
  * @returns The absolute path.
  */
-function expandHome(p: string, home: string): string {
-  return p.startsWith("~") ? resolve(home, p.slice(1).replace(/^[/\\]/, "")) : resolve(p);
+function expandHome(p: string, home: string, cwd: string): string {
+  if (p === "~") return resolve(home);
+  if (p.startsWith("~/") || p.startsWith("~\\")) return resolve(home, p.slice(2));
+  return resolve(cwd, p);
 }
 
 /** Where the parser reads the world from, so a test can supply its own. */
@@ -170,6 +185,8 @@ export function parseArgs(argv: string[], environment: ParseEnvironment = {}): C
     allowedOrigins: [...DEFAULT_ORIGINS],
   };
 
+  const root = (p: string) => expandHome(p, home, cwd);
+
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--root-from-cwd") {
@@ -180,22 +197,27 @@ export function parseArgs(argv: string[], environment: ParseEnvironment = {}): C
     } else if (arg === "--terminal-approval") {
       cli.terminalApproval = true;
     } else if (arg === "--review-timeout-ms") {
-      cli.reviewTimeoutMs = positiveInt(arg, nextValue(arg, argv, ++i));
+      cli.reviewTimeoutMs = positiveInteger(arg, nextValue(arg, argv, ++i), MILLISECONDS);
     } else if (arg.startsWith("--review-timeout-ms=")) {
-      cli.reviewTimeoutMs = positiveInt(
+      cli.reviewTimeoutMs = positiveInteger(
         "--review-timeout-ms",
         inlineValue("--review-timeout-ms", arg),
+        MILLISECONDS,
       );
     } else if (arg === "--block-on-review") {
       cli.blockOnReview = true;
     } else if (arg === "--review-grace-ms") {
-      cli.reviewGraceMs = positiveInt(arg, nextValue(arg, argv, ++i));
+      cli.reviewGraceMs = positiveInteger(arg, nextValue(arg, argv, ++i), MILLISECONDS);
     } else if (arg.startsWith("--review-grace-ms=")) {
-      cli.reviewGraceMs = positiveInt("--review-grace-ms", inlineValue("--review-grace-ms", arg));
+      cli.reviewGraceMs = positiveInteger(
+        "--review-grace-ms",
+        inlineValue("--review-grace-ms", arg),
+        MILLISECONDS,
+      );
     } else if (arg === "--root") {
-      cli.roots.push(expandHome(nextValue(arg, argv, ++i), home));
+      cli.roots.push(root(nextValue(arg, argv, ++i)));
     } else if (arg.startsWith("--root=")) {
-      cli.roots.push(expandHome(inlineValue("--root", arg), home));
+      cli.roots.push(root(inlineValue("--root", arg)));
     } else if (arg === "--deny") {
       cli.deny.push(nextValue(arg, argv, ++i));
     } else if (arg.startsWith("--deny=")) {
@@ -206,10 +228,10 @@ export function parseArgs(argv: string[], environment: ParseEnvironment = {}): C
       cli.http = true;
     } else if (arg === "--http-port") {
       cli.http = true;
-      cli.httpPort = positiveInt(arg, nextValue(arg, argv, ++i));
+      cli.httpPort = positiveInteger(arg, nextValue(arg, argv, ++i), PORT);
     } else if (arg.startsWith("--http-port=")) {
       cli.http = true;
-      cli.httpPort = positiveInt("--http-port", inlineValue("--http-port", arg));
+      cli.httpPort = positiveInteger("--http-port", inlineValue("--http-port", arg), PORT);
     } else if (arg === "--allow-origin") {
       cli.allowedOrigins.push(nextValue(arg, argv, ++i));
     } else if (arg.startsWith("--allow-origin=")) {
@@ -219,7 +241,7 @@ export function parseArgs(argv: string[], environment: ParseEnvironment = {}): C
     } else if (arg === "--help" || arg === "-h") {
       cli.help = true;
     } else if (!arg.startsWith("-")) {
-      cli.roots.push(expandHome(arg, home));
+      cli.roots.push(root(arg));
     } else {
       throw new Error(`Unknown flag ${arg}`);
     }
@@ -227,42 +249,3 @@ export function parseArgs(argv: string[], environment: ParseEnvironment = {}): C
 
   return cli;
 }
-
-/** What the server prints for `--help`, and alongside every startup refusal. */
-export const HELP = `interactive-editor — a live-edit review panel in front of every file write.
-
-Usage:
-  node <path-to-server> --root <dir> [--root <dir> ...] [options]
-
-Options:
-  --root <dir>                 A directory the editor may write inside. Required, repeatable.
-  --root-from-cwd              Add the working directory as a root. For hosts that
-                               launch the server inside the project (Claude Code).
-  --deny <substring>           Extra path substring to refuse. Repeatable.
-  --allow-everything-in-roots  Drop the built-in deny list (.git, node_modules, .env, keys...).
-  --dry-run                    Run the whole flow but never touch disk.
-  --terminal-approval          Expose the commit tool to the agent, for hosts that
-                               cannot render the editor. You get your client's
-                               approve/deny prompt instead of an editor. Weaker.
-  --block-on-review            Hold the opening call open until the human accepts or
-                               comments, so its result is the decision. Needs a host
-                               that dispatches the panel's calls while one is open;
-                               where it does not, the panel never loads. Off by default.
-  --review-timeout-ms <ms>     How long an opening call waits for the human. Default 600000.
-  --review-grace-ms <ms>       How long to wait for the panel to attach. Default 30000.
-  --http                       Serve over Streamable HTTP on 127.0.0.1 instead of stdio.
-                               For browser hosts and inspectors, which cannot spawn
-                               a process. Stdio stays the default.
-  --http-port <n>              Port for --http. Default 3001.
-  --allow-origin <origin>      Extra browser origin allowed to call the HTTP endpoint.
-                               Repeatable. The reference host and inspector ports
-                               are allowed already.
-  -h, --help                   This.
-
-A value that begins with a flag is refused rather than consumed, so a missing
-argument stops the server instead of quietly changing what the next flag meant.
-Write --flag=value when a value genuinely starts with a dash.
-
-Every write goes through a View the human edits and approves. The agent can open
-the editor; only a click can walk through it.
-`;

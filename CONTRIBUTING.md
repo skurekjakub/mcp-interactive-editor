@@ -8,7 +8,8 @@ npm run build
 npm test
 ```
 
-Node 20.10 or newer (`.nvmrc` pins it).
+Node 22 or newer. `engines` in `package.json` refuses an older install, and
+`.nvmrc` names the version CI runs.
 
 ## Working on the editor
 

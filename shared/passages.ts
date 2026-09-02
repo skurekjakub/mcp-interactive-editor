@@ -23,7 +23,6 @@ export interface Passage {
    * is a quote with no question attached, which is why sending waits for it.
    */
   note?: string;
-  /** Character range in the draft. Only meaningful when `source` is "editor". */
 }
 
 /** One rendered diff row, as the pane reports it. */

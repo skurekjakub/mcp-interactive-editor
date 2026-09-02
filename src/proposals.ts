@@ -1,16 +1,20 @@
+/**
+ * @module
+ *
+ * The life of a proposal: opened, edited, claimed by a panel, and closed.
+ *
+ * Everything here reads and writes the shared store rather than holding state
+ * of its own, because the process answering the panel is routinely not the one
+ * that opened the proposal.
+ */
 import { randomUUID } from "node:crypto";
 import type { EditorState, Proposal, Resolution, TargetInfo, WriteMode } from "../shared/types.js";
 import { composeState } from "../shared/state.js";
 import type { FsGuard } from "./fsGuard.js";
-import { sha256 } from "./fsGuard.js";
-import {
-  allProposals,
-  deleteProposal,
-  readProposal,
-  readTombstone,
-  writeProposal,
-  writeTombstone,
-} from "./store.js";
+import { sha256 } from "./hash.js";
+import { namesTarget, sameTarget } from "./pathSpelling.js";
+import { allProposals, deleteProposal, readProposal, writeProposal } from "./store/records.js";
+import { pruneTombstones, readTombstone, writeTombstone } from "./store/tombstones.js";
 import { SERVER_VERSION } from "./version.js";
 
 /**
@@ -226,8 +230,6 @@ export async function findOpenProposal(path?: string): Promise<Proposal | undefi
   const exact = open.filter((p) => p.target.requested === path);
   if (exact.length > 0) return exact[exact.length - 1];
 
-  // A host is free to normalise a path on the way through — slashes, case,
-  // relative to absolute — so an exact string match is not the only match.
   const resolved = open.filter((p) => namesTarget(p.target, path));
   if (resolved.length > 0) return resolved[resolved.length - 1];
 
@@ -241,71 +243,6 @@ export async function findOpenProposal(path?: string): Promise<Proposal | undefi
    * wrong file. The retry finds the right one once it is created.
    */
   return open.length === 1 ? open[0] : undefined;
-}
-
-/**
- * Reports whether two resolved targets name the same file.
- *
- * The guard has already resolved both, against the configured root and through
- * every symlink. Re-resolving the requested spelling instead would resolve it
- * against the working directory, which is not the root in the shipped bundle —
- * two spellings of one file would then compare unequal, no supersede would fire,
- * and two live drafts of the same file would each commit and each report
- * success, the older one silently overwriting the newer.
- *
- * Compared verbatim, without case folding: on a case-sensitive filesystem
- * `a.txt` and `A.txt` are different files, and folding them together would close
- * a review the human still has open.
- *
- * @param a - One resolved target.
- * @param b - The other resolved target.
- * @returns True when both resolved to the same location.
- */
-function sameTarget(a: TargetInfo, b: TargetInfo): boolean {
-  return a.absolute !== null && a.absolute === b.absolute;
-}
-
-/**
- * Comparison that matches how the running filesystem treats names.
- *
- * Windows and the default macOS volume fold case; Linux does not, and folding
- * there would let one file's spelling claim another file's proposal.
- */
-const foldsCase = process.platform === "win32" || process.platform === "darwin";
-
-/**
- * Normalises a path for comparison without resolving it.
- *
- * Resolving would anchor a relative path to the working directory, which is not
- * where the guard anchors it.
- *
- * @param p - The path to normalise.
- * @returns The path with one separator style, folded if the filesystem folds.
- */
-function forCompare(p: string): string {
-  const slashed = p.split("\\").join("/");
-  return foldsCase ? slashed.toLowerCase() : slashed;
-}
-
-/**
- * Reports whether a path the host echoed back names this target.
- *
- * The host may hand the panel any spelling of the argument it was given, so the
- * already-resolved absolute path is what it is measured against. A relative
- * spelling is matched as a trailing segment of that path rather than resolved,
- * because the working directory is not the root the guard resolved against.
- *
- * @param target - The proposal's resolved target.
- * @param path - The spelling the panel was handed.
- * @returns True when the path names this target.
- */
-function namesTarget(target: TargetInfo, path: string): boolean {
-  const wanted = forCompare(path);
-  if (forCompare(target.requested) === wanted) return true;
-  if (!target.absolute) return false;
-
-  const absolute = forCompare(target.absolute);
-  return absolute === wanted || absolute.endsWith(`/${wanted}`);
 }
 
 /**
@@ -331,6 +268,8 @@ export async function openProposals(): Promise<Proposal[]> {
  * @returns A promise that settles once the store is back within its limit.
  */
 async function evict(): Promise<void> {
+  await pruneTombstones();
+
   const held = await allProposals();
   if (held.length <= MAX_RETAINED) return;
 

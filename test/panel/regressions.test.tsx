@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { App } from "../../ui/src/App.js";
 import { OpeningStatus } from "../../ui/src/components/OpeningStatus.js";
 import { ReviewPanes } from "../../ui/src/components/ReviewPanes.js";
-import { previewState } from "../../ui/src/bridge.js";
+import { previewState } from "../../ui/src/preview.js";
 
 /**
  * One test per defect that reached a release through `ui/`.

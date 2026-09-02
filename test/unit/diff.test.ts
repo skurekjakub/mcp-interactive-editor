@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countLines, diffLines, formatUnifiedDiff, splitLines } from "../../shared/diff.js";
+import { countLines, diffLines, splitLines } from "../../shared/diff.js";
 
 const lines = (n: number, prefix = "line") =>
   Array.from({ length: n }, (_, i) => `${prefix} ${i}`).join("\n");
@@ -108,24 +108,6 @@ describe("diffLines", () => {
 
     expect(stats.truncated).toBeUndefined();
     expect(stats.added).toBe(1);
-  });
-});
-
-describe("formatUnifiedDiff", () => {
-  it("says so plainly when there is nothing to show", () => {
-    const { hunks } = diffLines("x", "x");
-    expect(formatUnifiedDiff(hunks, "file.txt")).toBe("(no changes to file.txt)");
-  });
-
-  it("marks added and removed lines the way a patch does", () => {
-    const { hunks } = diffLines("a\nb", "a\nc");
-    const text = formatUnifiedDiff(hunks, "file.txt");
-
-    expect(text).toContain("--- file.txt (on disk)");
-    expect(text).toContain("+++ file.txt (proposed)");
-    expect(text).toContain("-b");
-    expect(text).toContain("+c");
-    expect(text).toMatch(/@@ -\d+,\d+ \+\d+,\d+ @@/);
   });
 });
 

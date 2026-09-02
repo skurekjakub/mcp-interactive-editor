@@ -6,6 +6,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-02
+
+### Fixed
+
+- **Saving could fail with "Could not send your edits to the server" through
+  no fault of the human.** The panel's debounced sync and its pre-commit flush
+  can both be writing the same proposal record at once, and they shared a temp
+  file name, so one write took the file out from under the other. Each write
+  has its own name.
+- **A server that crashed mid-commit left the proposal uncommittable for
+  good.** The claim that stops one approval being written twice is a directory
+  on disk, and nothing removed one whose holder had died, so every later
+  attempt was told the write was already in progress. A claim older than any
+  write could hold it is taken over.
+- **On a shared Linux machine, a second user's server could not start.** The
+  store's parent directory under `/tmp` was created readable by its owner
+  alone, and the next account to start the editor could not create its own
+  store inside it. The parent is named for the account.
+- **"Add one" on CRLF content with no final newline appended a bare LF**, which
+  resolved that finding by raising the mixed-line-endings one. The terminator
+  added matches the ones already there.
+- **The end-of-file newline note said "no line differs" even when lines did.**
+  It fires whenever the terminator changes, but the wording assumed that was
+  the only change. It says so only when it is.
+- **The unified diff the model reads carried `\ No newline at end of file`
+  after lines that were terminated**, whenever a file lacked a final newline
+  and the change sat anywhere but on its last line. The marker follows the
+  file's final line only.
+- **A file named with consecutive dots, such as `notes..md`, was reported as a
+  traversal.** Only a whole `..` segment counts.
+- **`--http-port eight` complained about milliseconds**, and a fractional
+  timing value such as `--review-grace-ms 250.5` was accepted. Each refusal
+  names what it wanted, and only whole numbers pass.
+- **`--root ~alice/x` was silently moved into the current user's home.** Only a
+  bare `~` or a `~/` prefix expands; anything else is left as written.
+- **One bad HTTP request could take the whole server down.** A request whose
+  handling rejected had nothing to catch it. It answers with a 500 and the
+  other sessions keep working.
+- **`--help` described `--deny` as a substring match.** It is anchored, as the
+  README and the deny list's own documentation say.
+
+### Changed
+
+- **Tombstones are pruned after a day**, so a server that lives for weeks does
+  not leave one file per forgotten proposal in the temp directory forever.
+- **The HTTP transport's CORS answers carry `Vary: Origin`.**
+- **The model-facing `instructions` and the tool descriptions are built from
+  one account of whether an opening call waits**, so they cannot disagree.
+- The deny matcher, the path-spelling comparison, the store's three record
+  kinds, the lint rule families, the unified-diff renderer and the panel's
+  claim-and-attach handshake each live in their own module, with the pure ones
+  covered directly by unit tests. The end-to-end suite is one file per concern
+  over a shared harness, and the parser honours the working directory it is
+  handed rather than the process's own.
+
 ## [0.7.1] - 2026-08-31
 
 ### Fixed
@@ -693,6 +748,7 @@ First cut.
   MCP registry.
 
 [Unreleased]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...HEAD
+[0.7.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/skurekjakub/mcp-interactive-editor/compare/v0.6.1...v0.6.2

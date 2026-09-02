@@ -169,11 +169,12 @@ export interface DiffStats {
   /** Set when the files were too large to diff line by line. */
   truncated?: boolean;
   /**
-   * Set when only the trailing newline differs.
+   * Set when the trailing newline differs between the two sides.
    *
-   * Such a change alters the bytes on disk without altering any line, so the
-   * hunks are empty. Both readers are told about it as a finding instead, since
-   * an empty diff in front of a real write reads as nothing happening.
+   * Lines are compared without their terminators, so this change never appears
+   * in the hunks, whether it arrives alone or alongside other edits. Both readers
+   * are told about it as a finding instead, since an empty diff in front of a
+   * real write reads as nothing happening.
    */
   newlineAtEofChanged?: boolean;
 }

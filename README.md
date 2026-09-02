@@ -18,7 +18,7 @@ MCP App · live diff against disk · per-line comments · human-in-the-loop · l
 [![ci](https://github.com/skurekjakub/mcp-interactive-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/skurekjakub/mcp-interactive-editor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![MCP App](https://img.shields.io/badge/MCP-App-6E56CF)](https://apps.extensions.modelcontextprotocol.io/)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520.10-3C873A)](.nvmrc)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-3C873A)](.nvmrc)
 
 [Install](#install) · [How it works](#how-it-works) · [Host support](#host-support-honestly) · [Guarantees](#why-the-model-cannot-approve-its-own-write) · [Options](#options) · [Development](#development)
 
@@ -366,6 +366,9 @@ node bundle/server/index.js --root <dir> [--root <dir> ...] [options]
   --block-on-review            Hold the opening call open until the human decides.
   --review-timeout-ms <ms>     How long that call waits for a human. Default 600000.
   --review-grace-ms <ms>       How long to wait for the panel to attach. Default 30000.
+  --http                       Serve over Streamable HTTP on 127.0.0.1 instead of stdio.
+  --http-port <n>              Port for --http. Default 3001.
+  --allow-origin <origin>      Extra browser origin allowed to call the HTTP endpoint. Repeatable.
 ```
 
 `INTERACTIVE_EDITOR_DRY_RUN=true` does the same as `--dry-run`, for launchers

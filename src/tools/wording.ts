@@ -1,10 +1,3 @@
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { EditorState, ProposalHandle } from "../../shared/types.js";
-import { endsWithNewline, formatUnifiedDiff } from "../../shared/diff.js";
-import { explainRejection } from "../../shared/rejection.js";
-import { proposedContent } from "../../shared/state.js";
-import type { ToolContext } from "./context.js";
-
 /**
  * @module
  *
@@ -22,6 +15,12 @@ import type { ToolContext } from "./context.js";
  * Everything here is pure: given a state, what do the two readers see. Side
  * effects belong to the tools; the wording belongs here.
  */
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { EditorState, ProposalHandle } from "../../shared/types.js";
+import { explainRejection } from "../../shared/rejection.js";
+import { proposedContent } from "../../shared/state.js";
+import { formatUnifiedDiff } from "../../shared/unifiedDiff.js";
+import type { ToolContext } from "./context.js";
 
 /** How much diff the model is worth. The panel always shows all of it. */
 export const MODEL_DIFF_LINE_BUDGET = 80;
@@ -60,10 +59,10 @@ export function handleFor(state: EditorState): ProposalHandle {
  * description that promises to wait while the server returns immediately tells
  * the model its next observation will be a verdict when it is a diff.
  *
- * @param context - The running tool context.
+ * @param context - Whether opening calls block on the review.
  * @returns A sentence describing how the outcome will arrive.
  */
-export function outcomeDescription(context: ToolContext): string {
+export function outcomeDescription(context: Pick<ToolContext, "blockOnReview">): string {
   return context.blockOnReview
     ? "It does not return until the human acts: either they accept it and the result is a " +
         "receipt for what landed, or they comment on it, which is a rejection — nothing is " +
@@ -72,6 +71,25 @@ export function outcomeDescription(context: ToolContext): string {
         "verdict. The outcome arrives separately: a receipt if they saved, or their comments " +
         "quoted against the lines they are about. Comments mean the draft was declined and " +
         "nothing was written, so redraft from what they said rather than re-proposing.";
+}
+
+/**
+ * Describes the editor to the model when the session initialises.
+ *
+ * Ends with the same account of the outcome the tool descriptions carry, so the
+ * two cannot disagree about whether an opening call waits.
+ *
+ * @param context - Whether opening calls block on the review.
+ * @returns The server's `instructions` string.
+ */
+export function serverInstructions(context: Pick<ToolContext, "blockOnReview">): string {
+  return (
+    "propose_write opens an editable review panel: the human gets a live diff against disk, " +
+    "edits your draft in place, and either saves it or comments on it. Reach for it when a " +
+    "write is worth a second pair of eyes, and open_file when they would rather write the " +
+    "change themselves.\n\n" +
+    outcomeDescription(context)
+  );
 }
 
 /**
@@ -186,8 +204,8 @@ export function describeState(state: EditorState): string {
 export function diffForModel(state: EditorState): string {
   const { proposal } = state;
   const full = formatUnifiedDiff(state.diff, proposal.target.display, {
-    before: endsWithNewline(proposal.baseline),
-    after: endsWithNewline(proposedContent(proposal)),
+    before: proposal.baseline,
+    after: proposedContent(proposal),
   });
   const lines = full.split("\n");
   if (lines.length <= MODEL_DIFF_LINE_BUDGET && full.length <= MODEL_DIFF_CHAR_BUDGET) return full;
