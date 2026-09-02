@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { CommitReceipt } from "../../../shared/types.js";
+import type { CommitReceipt, EditorState } from "../../../shared/types.js";
 
 /**
  * Renders whatever came back from a rejected promise as something showable.
@@ -45,6 +45,20 @@ export function receiptIn(result: CallToolResult): CommitReceipt | null {
   if (typeof candidate.display !== "string" || typeof candidate.sha256 !== "string") return null;
   if (typeof candidate.mode !== "string") return null;
   return candidate as CommitReceipt;
+}
+
+/**
+ * Extracts the editor state from one of the panel's own results, when it carries one.
+ *
+ * The panel's tools answer with the whole state; a claim that found nothing
+ * answers with a note instead. Only a payload naming a proposal is a state.
+ *
+ * @param result - The result of a claim, attach or update call.
+ * @returns The state, or null when the result carries none.
+ */
+export function stateIn(result: CallToolResult): EditorState | null {
+  const candidate = result.structuredContent as Partial<EditorState> | undefined;
+  return candidate?.proposal ? (candidate as EditorState) : null;
 }
 
 /**

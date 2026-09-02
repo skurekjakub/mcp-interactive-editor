@@ -43,7 +43,13 @@ export function serveHttp(options: HttpOptions): Promise<void> {
   const sessions = new Map<string, StreamableHTTPServerTransport>();
 
   const http = createServer((req, res) => {
-    void handle(req, res, sessions, options);
+    handle(req, res, sessions, options).catch((cause: unknown) => {
+      // A rejection nothing catches is fatal to the process, and every other
+      // session goes down with the one request that failed.
+      process.stderr.write(`interactive-editor: request failed: ${describe(cause)}\n`);
+      if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" });
+      res.end("The server could not handle that request.\n");
+    });
   });
 
   return new Promise((resolve, reject) => {
@@ -158,6 +164,10 @@ async function openSession(
  * @param allowed - Origins to accept.
  */
 function applyCors(req: IncomingMessage, res: ServerResponse, allowed: string[]): void {
+  // The answer depends on the origin, and a cache that does not know that
+  // would hand one origin's allowance to the next.
+  res.setHeader("vary", "origin");
+
   const origin = header(req, "origin");
   if (!origin || !allowed.includes(origin)) return;
 
@@ -180,4 +190,14 @@ function applyCors(req: IncomingMessage, res: ServerResponse, allowed: string[])
 function header(req: IncomingMessage, name: string): string | undefined {
   const value = req.headers[name];
   return Array.isArray(value) ? value[0] : value;
+}
+
+/**
+ * Renders a thrown value as one line for the log.
+ *
+ * @param cause - Whatever was thrown.
+ * @returns Its message, or the value itself as text.
+ */
+function describe(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

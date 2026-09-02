@@ -11,7 +11,9 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse, resolve } from "node:path";
-import { DEFAULT_DENY, FsGuard, sha256 } from "../../src/fsGuard.js";
+import { DEFAULT_DENY } from "../../src/fs/deny.js";
+import { FsGuard } from "../../src/fsGuard.js";
+import { sha256 } from "../../src/hash.js";
 
 let root: string;
 let outside: string;

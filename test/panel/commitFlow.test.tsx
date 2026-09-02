@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CommitReceipt } from "../../shared/types.js";
-import { previewState, type Bridge } from "../../ui/src/bridge.js";
+import type { Bridge } from "../../ui/src/bridge.js";
+import { previewState } from "../../ui/src/preview.js";
 import { useCommitFlow } from "../../ui/src/hooks/useCommitFlow.js";
 import { usePassages } from "../../ui/src/hooks/usePassages.js";
 

@@ -17,6 +17,27 @@ tree.
 Every finding is reported with the break that was applied and the output. A
 finding without one is a hypothesis.
 
+### Making the scratch copy
+
+Copy everything except `node_modules`, `.git`, `dist`, `bundle` and `coverage`,
+then put a link to the real `node_modules` inside the copy — vitest resolves
+through it and nothing is installed twice. On Windows, under Git Bash:
+
+```bash
+MSYS_NO_PATHCONV=1 robocopy "$(cygpath -w "$REPO")" "$(cygpath -w "$COPY")" /E /XD node_modules .git dist bundle coverage
+cmd //c mklink //J "$(cygpath -w "$COPY/node_modules")" "$(cygpath -w "$REPO/node_modules")"
+```
+
+`MSYS_NO_PATHCONV` matters: without it the shell rewrites `/E` and `/XD` as
+paths and robocopy copies nothing, silently. Remove the junction with
+`cmd //c rmdir` before deleting the copy, so nothing recurses into the real
+`node_modules` through it.
+
+Apply each break with a scripted string replacement that refuses to run when
+the target text is absent, run only the test file that should notice, and
+restore the file by copying it back from the working tree. A probe that "could
+not apply" is a probe that proved nothing.
+
 ## What this repo has actually shipped
 
 - **A property the component never receives.** `expect(editor.disabled).toBe(false)`

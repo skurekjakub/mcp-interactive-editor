@@ -1,7 +1,7 @@
 import type { CommitReceipt, Proposal } from "../../shared/types.js";
 import { hasBlockers } from "../../shared/lint.js";
 import { countLines } from "../../shared/diff.js";
-import { sha256 } from "../fsGuard.js";
+import { sha256 } from "../hash.js";
 import {
   buildEditorState,
   getProposal,
@@ -10,7 +10,7 @@ import {
   restatTarget,
   updateProposal,
 } from "../proposals.js";
-import { claimForCommit, releaseCommit } from "../store.js";
+import { claimForCommit, releaseCommit } from "../store/claims.js";
 import type { ToolContext } from "./context.js";
 
 /**

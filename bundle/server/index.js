@@ -23439,49 +23439,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative2, options, skipNormalization) {
+    function resolveComponent(base, relative3, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative2 = parse3(serialize(relative2, options), options);
+        relative3 = parse3(serialize(relative3, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative2.scheme) {
-        target.scheme = relative2.scheme;
-        target.userinfo = relative2.userinfo;
-        target.host = relative2.host;
-        target.port = relative2.port;
-        target.path = removeDotSegments(relative2.path || "");
-        target.query = relative2.query;
+      if (!options.tolerant && relative3.scheme) {
+        target.scheme = relative3.scheme;
+        target.userinfo = relative3.userinfo;
+        target.host = relative3.host;
+        target.port = relative3.port;
+        target.path = removeDotSegments(relative3.path || "");
+        target.query = relative3.query;
       } else {
-        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
-          target.userinfo = relative2.userinfo;
-          target.host = relative2.host;
-          target.port = relative2.port;
-          target.path = removeDotSegments(relative2.path || "");
-          target.query = relative2.query;
+        if (relative3.userinfo !== void 0 || relative3.host !== void 0 || relative3.port !== void 0) {
+          target.userinfo = relative3.userinfo;
+          target.host = relative3.host;
+          target.port = relative3.port;
+          target.path = removeDotSegments(relative3.path || "");
+          target.query = relative3.query;
         } else {
-          if (!relative2.path) {
+          if (!relative3.path) {
             target.path = base.path;
-            if (relative2.query !== void 0) {
-              target.query = relative2.query;
+            if (relative3.query !== void 0) {
+              target.query = relative3.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative2.path[0] === "/") {
-              target.path = removeDotSegments(relative2.path);
+            if (relative3.path[0] === "/") {
+              target.path = removeDotSegments(relative3.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative2.path;
+                target.path = "/" + relative3.path;
               } else if (!base.path) {
-                target.path = relative2.path;
+                target.path = relative3.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative3.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative2.query;
+            target.query = relative3.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -23489,7 +23489,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative2.fragment;
+      target.fragment = relative3.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -36492,23 +36492,167 @@ var StdioServerTransport = class {
 
 // src/cli.ts
 import { homedir } from "node:os";
-import { resolve as resolve2 } from "node:path";
+import { resolve } from "node:path";
+
+// src/fs/deny.ts
+var DEFAULT_DENY = [
+  ".git/",
+  "node_modules/",
+  ".env",
+  ".ssh/",
+  "id_rsa",
+  ".pem",
+  ".key",
+  ".p12",
+  ".pfx",
+  "credentials",
+  ".aws/",
+  ".npmrc"
+];
+function matchDeny(patterns, relativePath) {
+  const segments = relativePath.toLowerCase().split("/");
+  const name = segments[segments.length - 1] ?? "";
+  const directories = segments.slice(0, -1);
+  for (const pattern of patterns) {
+    const wanted = pattern.toLowerCase();
+    if (wanted === "") continue;
+    if (wanted.endsWith("/")) {
+      if (directories.includes(wanted.slice(0, -1))) return pattern;
+      continue;
+    }
+    if (wanted.startsWith(".")) {
+      if (name === wanted || name.startsWith(`${wanted}.`) || name.endsWith(wanted)) {
+        return pattern;
+      }
+      continue;
+    }
+    if (name === wanted || name.startsWith(`${wanted}.`)) return pattern;
+  }
+  return null;
+}
+
+// src/cli.ts
+var DEFAULT_ORIGINS = [
+  "http://localhost:8080",
+  "http://127.0.0.1:8080",
+  "http://localhost:6274",
+  "http://127.0.0.1:6274"
+];
+var DEFAULT_HTTP_PORT = 3001;
+function dryRunFromEnv(env) {
+  const raw = env.INTERACTIVE_EDITOR_DRY_RUN?.trim().toLowerCase();
+  return raw === "true" || raw === "1" || raw === "yes";
+}
+var LOOKS_LIKE_FLAG = /^--?[A-Za-z]/;
+function nextValue(flag, argv, index) {
+  const value = argv[index];
+  if (value === void 0 || value.trim() === "") {
+    throw new Error(`${flag} needs a value, and nothing followed it`);
+  }
+  if (LOOKS_LIKE_FLAG.test(value)) {
+    throw new Error(
+      `${flag} needs a value, but ${value} followed it. Write ${flag}=${value} if that really is the value.`
+    );
+  }
+  return value;
+}
+function positiveInteger(flag, raw, what) {
+  const value = Number(raw);
+  if (raw === void 0 || raw === "" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`${flag} needs ${what}, got ${raw ?? "nothing"}`);
+  }
+  return value;
+}
+var MILLISECONDS = "a positive whole number of milliseconds";
+var PORT = "a port number";
+function inlineValue(flag, arg) {
+  const value = arg.slice(flag.length + 1);
+  if (value.trim() === "") throw new Error(`${flag} needs a value`);
+  return value;
+}
+function expandHome(p2, home, cwd) {
+  if (p2 === "~") return resolve(home);
+  if (p2.startsWith("~/") || p2.startsWith("~\\")) return resolve(home, p2.slice(2));
+  return resolve(cwd, p2);
+}
+function parseArgs(argv, environment = {}) {
+  const env = environment.env ?? process.env;
+  const cwd = environment.cwd ?? process.cwd();
+  const home = environment.home ?? homedir();
+  const cli = {
+    roots: [],
+    deny: [...DEFAULT_DENY],
+    dryRun: dryRunFromEnv(env),
+    terminalApproval: false,
+    blockOnReview: false,
+    http: false,
+    httpPort: DEFAULT_HTTP_PORT,
+    allowedOrigins: [...DEFAULT_ORIGINS]
+  };
+  const root2 = (p2) => expandHome(p2, home, cwd);
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--root-from-cwd") {
+      cli.roots.push(cwd);
+    } else if (arg === "--terminal-approval") {
+      cli.terminalApproval = true;
+    } else if (arg === "--review-timeout-ms") {
+      cli.reviewTimeoutMs = positiveInteger(arg, nextValue(arg, argv, ++i), MILLISECONDS);
+    } else if (arg.startsWith("--review-timeout-ms=")) {
+      cli.reviewTimeoutMs = positiveInteger(
+        "--review-timeout-ms",
+        inlineValue("--review-timeout-ms", arg),
+        MILLISECONDS
+      );
+    } else if (arg === "--block-on-review") {
+      cli.blockOnReview = true;
+    } else if (arg === "--review-grace-ms") {
+      cli.reviewGraceMs = positiveInteger(arg, nextValue(arg, argv, ++i), MILLISECONDS);
+    } else if (arg.startsWith("--review-grace-ms=")) {
+      cli.reviewGraceMs = positiveInteger(
+        "--review-grace-ms",
+        inlineValue("--review-grace-ms", arg),
+        MILLISECONDS
+      );
+    } else if (arg === "--root") {
+      cli.roots.push(root2(nextValue(arg, argv, ++i)));
+    } else if (arg.startsWith("--root=")) {
+      cli.roots.push(root2(inlineValue("--root", arg)));
+    } else if (arg === "--deny") {
+      cli.deny.push(nextValue(arg, argv, ++i));
+    } else if (arg.startsWith("--deny=")) {
+      cli.deny.push(inlineValue("--deny", arg));
+    } else if (arg === "--allow-everything-in-roots") {
+      cli.deny = [];
+    } else if (arg === "--http") {
+      cli.http = true;
+    } else if (arg === "--http-port") {
+      cli.http = true;
+      cli.httpPort = positiveInteger(arg, nextValue(arg, argv, ++i), PORT);
+    } else if (arg.startsWith("--http-port=")) {
+      cli.http = true;
+      cli.httpPort = positiveInteger("--http-port", inlineValue("--http-port", arg), PORT);
+    } else if (arg === "--allow-origin") {
+      cli.allowedOrigins.push(nextValue(arg, argv, ++i));
+    } else if (arg.startsWith("--allow-origin=")) {
+      cli.allowedOrigins.push(inlineValue("--allow-origin", arg));
+    } else if (arg === "--dry-run") {
+      cli.dryRun = true;
+    } else if (arg === "--help" || arg === "-h") {
+      cli.help = true;
+    } else if (!arg.startsWith("-")) {
+      cli.roots.push(root2(arg));
+    } else {
+      throw new Error(`Unknown flag ${arg}`);
+    }
+  }
+  return cli;
+}
 
 // src/fsGuard.ts
-import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import {
-  access,
-  chmod,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile
-} from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, readFile, realpath as realpath2, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname as dirname2, isAbsolute as isAbsolute2, join as join2, relative as relative2, resolve as resolve2 } from "node:path";
 
 // shared/diff.ts
 var LCS_CELL_BUDGET = 1500 * 1500;
@@ -36620,40 +36764,43 @@ function toHunks(lines) {
     };
   });
 }
-function formatUnifiedDiff(hunks, label, eof) {
-  if (hunks.length === 0) return `(no changes to ${label})`;
-  const out = [`--- ${label} (on disk)`, `+++ ${label} (proposed)`];
-  hunks.forEach((hunk, hunkIndex) => {
-    const oldCount = hunk.lines.filter((l) => l.kind !== "add").length;
-    const newCount = hunk.lines.filter((l) => l.kind !== "remove").length;
-    out.push(`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`);
-    hunk.lines.forEach((entry, lineIndex) => {
-      const marker = entry.kind === "add" ? "+" : entry.kind === "remove" ? "-" : " ";
-      out.push(marker + entry.text);
-      const lastOfAll = hunkIndex === hunks.length - 1 && lineIndex === hunk.lines.length - 1;
-      if (!lastOfAll || !eof) return;
-      const unterminated = entry.kind === "remove" ? !eof.before : !eof.after;
-      if (unterminated) out.push("\\ No newline at end of file");
-    });
-  });
-  return out.join("\n");
+
+// src/fs/paths.ts
+import { constants } from "node:fs";
+import { access, realpath } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+function contains(parent, child) {
+  if (parent === child) return true;
+  const rel = relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+async function realpathDeepest(target) {
+  const missing = [];
+  let current = target;
+  for (; ; ) {
+    try {
+      await access(current, constants.F_OK);
+      const resolved = await realpath(current);
+      return missing.length === 0 ? resolved : join(resolved, ...missing.reverse());
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) throw new Error(`Cannot resolve ${target}`);
+      missing.push(basename(current));
+      current = parent;
+    }
+  }
+}
+function toPosix(p2) {
+  return p2.split(sep).join("/");
+}
+
+// src/hash.ts
+import { createHash } from "node:crypto";
+function sha256(text) {
+  return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
 // src/fsGuard.ts
-var DEFAULT_DENY = [
-  ".git/",
-  "node_modules/",
-  ".env",
-  ".ssh/",
-  "id_rsa",
-  ".pem",
-  ".key",
-  ".p12",
-  ".pfx",
-  "credentials",
-  ".aws/",
-  ".npmrc"
-];
 var MAX_FILE_BYTES = 4 * 1024 * 1024;
 var PathRejected = class extends Error {
   constructor(message, reason) {
@@ -36674,8 +36821,8 @@ var FsGuard = class {
         "mcp-interactive-editor needs at least one --root. Refusing to start with none."
       );
     }
-    this.roots = options.roots.map((r2) => resolve(r2));
-    this.deny = options.deny.map((d2) => d2.toLowerCase());
+    this.roots = options.roots.map((r2) => resolve2(r2));
+    this.deny = [...options.deny];
     this.dryRun = options.dryRun;
   }
   /**
@@ -36694,7 +36841,7 @@ var FsGuard = class {
     const resolved = await Promise.all(
       this.roots.map(async (root2) => {
         try {
-          return await realpath(root2);
+          return await realpath2(root2);
         } catch {
           complete = false;
           return root2;
@@ -36730,7 +36877,7 @@ var FsGuard = class {
     });
     if (requested.trim() === "") return rejected("unresolvable");
     const roots = await this.resolveRoots();
-    const candidate = isAbsolute(requested) ? resolve(requested) : resolve(roots[0], requested);
+    const candidate = isAbsolute2(requested) ? resolve2(requested) : resolve2(roots[0], requested);
     let real;
     try {
       real = await realpathDeepest(candidate);
@@ -36739,8 +36886,8 @@ var FsGuard = class {
     }
     const root2 = roots.find((r2) => contains(r2, real)) ?? null;
     if (!root2) return rejected("outside-roots");
-    const rel = relative(root2, real);
-    const deniedBy = this.deniedBy(rel);
+    const rel = relative2(root2, real);
+    const deniedBy = matchDeny(this.deny, toPosix(rel));
     if (deniedBy) return rejected("denied", deniedBy);
     let exists = false;
     let onDisk;
@@ -36767,34 +36914,6 @@ var FsGuard = class {
       exists,
       onDisk
     };
-  }
-  /**
-   * Reports which deny pattern refuses a path, if any.
-   *
-   * @param relativePath - Path relative to the root that contains it.
-   * @returns The matching pattern, or null when nothing matched.
-   */
-  deniedBy(relativePath) {
-    const normalised = toPosix(relativePath).toLowerCase();
-    if (normalised.startsWith("../")) return "..";
-    const segments = normalised.split("/");
-    const name = segments[segments.length - 1] ?? "";
-    const directories = segments.slice(0, -1);
-    for (const pattern of this.deny) {
-      if (pattern === "") continue;
-      if (pattern.endsWith("/")) {
-        if (directories.includes(pattern.slice(0, -1))) return pattern;
-        continue;
-      }
-      if (pattern.startsWith(".")) {
-        if (name === pattern || name.startsWith(`${pattern}.`) || name.endsWith(pattern)) {
-          return pattern;
-        }
-        continue;
-      }
-      if (name === pattern || name.startsWith(`${pattern}.`)) return pattern;
-    }
-    return null;
   }
   /**
    * Reads a file inside the roots.
@@ -36837,8 +36956,8 @@ var FsGuard = class {
     const bytes = Buffer.byteLength(content, "utf8");
     const digest = sha256(content);
     if (this.dryRun) return { bytes, sha256: digest };
-    await mkdir(dirname(absolute), { recursive: true });
-    const temp = join(dirname(absolute), `.${randomUUID()}.interactive-editor.tmp`);
+    await mkdir(dirname2(absolute), { recursive: true });
+    const temp = join2(dirname2(absolute), `.${randomUUID()}.interactive-editor.tmp`);
     await writeFile(temp, content, "utf8");
     try {
       if (mode !== void 0) await chmod(temp, mode & 4095);
@@ -36859,141 +36978,8 @@ var FsGuard = class {
     await rm(absolute, { force: true });
   }
 };
-function sha256(text) {
-  return createHash("sha256").update(text, "utf8").digest("hex");
-}
-function contains(parent, child) {
-  if (parent === child) return true;
-  const rel = relative(parent, child);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-}
-async function realpathDeepest(target) {
-  const missing = [];
-  let current = target;
-  for (; ; ) {
-    try {
-      await access(current, constants.F_OK);
-      const resolved = await realpath(current);
-      return missing.length === 0 ? resolved : join(resolved, ...missing.reverse());
-    } catch {
-      const parent = dirname(current);
-      if (parent === current) throw new Error(`Cannot resolve ${target}`);
-      missing.push(basename(current));
-      current = parent;
-    }
-  }
-}
-function toPosix(p2) {
-  return p2.split(sep).join("/");
-}
 
-// src/cli.ts
-var DEFAULT_ORIGINS = [
-  "http://localhost:8080",
-  "http://127.0.0.1:8080",
-  "http://localhost:6274",
-  "http://127.0.0.1:6274"
-];
-var DEFAULT_HTTP_PORT = 3001;
-function dryRunFromEnv(env) {
-  const raw = env.INTERACTIVE_EDITOR_DRY_RUN?.trim().toLowerCase();
-  return raw === "true" || raw === "1" || raw === "yes";
-}
-var LOOKS_LIKE_FLAG = /^--?[A-Za-z]/;
-function nextValue(flag, argv, index) {
-  const value = argv[index];
-  if (value === void 0 || value.trim() === "") {
-    throw new Error(`${flag} needs a value, and nothing followed it`);
-  }
-  if (LOOKS_LIKE_FLAG.test(value)) {
-    throw new Error(
-      `${flag} needs a value, but ${value} followed it. Write ${flag}=${value} if that really is the value.`
-    );
-  }
-  return value;
-}
-function positiveInt(flag, raw) {
-  const value = Number(raw);
-  if (raw === void 0 || raw === "" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(`${flag} needs a positive number of milliseconds, got ${raw ?? "nothing"}`);
-  }
-  return value;
-}
-function inlineValue(flag, arg) {
-  const value = arg.slice(flag.length + 1);
-  if (value.trim() === "") throw new Error(`${flag} needs a value`);
-  return value;
-}
-function expandHome(p2, home) {
-  return p2.startsWith("~") ? resolve2(home, p2.slice(1).replace(/^[/\\]/, "")) : resolve2(p2);
-}
-function parseArgs(argv, environment = {}) {
-  const env = environment.env ?? process.env;
-  const cwd = environment.cwd ?? process.cwd();
-  const home = environment.home ?? homedir();
-  const cli = {
-    roots: [],
-    deny: [...DEFAULT_DENY],
-    dryRun: dryRunFromEnv(env),
-    terminalApproval: false,
-    blockOnReview: false,
-    http: false,
-    httpPort: DEFAULT_HTTP_PORT,
-    allowedOrigins: [...DEFAULT_ORIGINS]
-  };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === "--root-from-cwd") {
-      cli.roots.push(cwd);
-    } else if (arg === "--terminal-approval") {
-      cli.terminalApproval = true;
-    } else if (arg === "--review-timeout-ms") {
-      cli.reviewTimeoutMs = positiveInt(arg, nextValue(arg, argv, ++i));
-    } else if (arg.startsWith("--review-timeout-ms=")) {
-      cli.reviewTimeoutMs = positiveInt(
-        "--review-timeout-ms",
-        inlineValue("--review-timeout-ms", arg)
-      );
-    } else if (arg === "--block-on-review") {
-      cli.blockOnReview = true;
-    } else if (arg === "--review-grace-ms") {
-      cli.reviewGraceMs = positiveInt(arg, nextValue(arg, argv, ++i));
-    } else if (arg.startsWith("--review-grace-ms=")) {
-      cli.reviewGraceMs = positiveInt("--review-grace-ms", inlineValue("--review-grace-ms", arg));
-    } else if (arg === "--root") {
-      cli.roots.push(expandHome(nextValue(arg, argv, ++i), home));
-    } else if (arg.startsWith("--root=")) {
-      cli.roots.push(expandHome(inlineValue("--root", arg), home));
-    } else if (arg === "--deny") {
-      cli.deny.push(nextValue(arg, argv, ++i));
-    } else if (arg.startsWith("--deny=")) {
-      cli.deny.push(inlineValue("--deny", arg));
-    } else if (arg === "--allow-everything-in-roots") {
-      cli.deny = [];
-    } else if (arg === "--http") {
-      cli.http = true;
-    } else if (arg === "--http-port") {
-      cli.http = true;
-      cli.httpPort = positiveInt(arg, nextValue(arg, argv, ++i));
-    } else if (arg.startsWith("--http-port=")) {
-      cli.http = true;
-      cli.httpPort = positiveInt("--http-port", inlineValue("--http-port", arg));
-    } else if (arg === "--allow-origin") {
-      cli.allowedOrigins.push(nextValue(arg, argv, ++i));
-    } else if (arg.startsWith("--allow-origin=")) {
-      cli.allowedOrigins.push(inlineValue("--allow-origin", arg));
-    } else if (arg === "--dry-run") {
-      cli.dryRun = true;
-    } else if (arg === "--help" || arg === "-h") {
-      cli.help = true;
-    } else if (!arg.startsWith("-")) {
-      cli.roots.push(expandHome(arg, home));
-    } else {
-      throw new Error(`Unknown flag ${arg}`);
-    }
-  }
-  return cli;
-}
+// src/help.ts
 var HELP = `interactive-editor \u2014 a live-edit review panel in front of every file write.
 
 Usage:
@@ -37003,7 +36989,8 @@ Options:
   --root <dir>                 A directory the editor may write inside. Required, repeatable.
   --root-from-cwd              Add the working directory as a root. For hosts that
                                launch the server inside the project (Claude Code).
-  --deny <substring>           Extra path substring to refuse. Repeatable.
+  --deny <pattern>             Extra name to refuse: a filename, an extension such as
+                               .pem, or a directory such as secrets/. Repeatable.
   --allow-everything-in-roots  Drop the built-in deny list (.git, node_modules, .env, keys...).
   --dry-run                    Run the whole flow but never touch disk.
   --terminal-approval          Expose the commit tool to the agent, for hosts that
@@ -37034,7 +37021,7 @@ the editor; only a click can walk through it.
 
 // src/http.ts
 import { createServer } from "node:http";
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 
 // node_modules/@hono/node-server/dist/constants-BLSFu_RU.mjs
 var X_ALREADY_SENT = "x-hono-already-sent";
@@ -39225,7 +39212,7 @@ function isAwaitingReview(proposalId) {
 
 // src/tools/view.ts
 import { readFile as readFile2 } from "node:fs/promises";
-import { dirname as dirname2, resolve as resolve3 } from "node:path";
+import { dirname as dirname3, resolve as resolve3 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/tools/context.ts
@@ -39266,7 +39253,7 @@ var PANEL_CANDIDATES = ["../ui/index.html", "../../ui/index.html", "../../dist/u
 var cachedHtml;
 async function loadViewHtml() {
   if (cachedHtml) return cachedHtml;
-  const here = dirname2(fileURLToPath(import.meta.url));
+  const here = dirname3(fileURLToPath(import.meta.url));
   const missing = [];
   const rejected = [];
   for (const candidate of PANEL_CANDIDATES) {
@@ -39314,101 +39301,23 @@ var contentInput = external_exports.string().max(
 );
 
 // src/proposals.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 
-// shared/rejection.ts
-function rejectionDetail(target, roots) {
-  const reason = target.rejection ?? "unresolvable";
-  switch (reason) {
-    case "outside-roots":
-      return `It is outside the roots this editor will write to.
-Writable roots:
-${roots.map((r2) => `  ${r2}`).join("\n")}`;
-    case "denied":
-      return `It matches the deny list${target.deniedBy ? ` (${target.deniedBy})` : ""}, so this editor will not touch it even though it is inside a writable root. Start the server with --deny to choose your own patterns.`;
-    case "not-a-file":
-      return "It is a directory, not a file.";
-    case "too-large":
-      return "It is too large to review in an editor.";
-    case "unresolvable":
-    default:
-      return "It could not be resolved to a path on disk.";
-  }
-}
-function explainRejection(target, roots) {
-  return `Refused: "${target.requested}" \u2014 ${rejectionDetail(target, roots)}`;
-}
-
-// shared/lint.ts
+// shared/lint/destructive.ts
 var DESTRUCTIVE_DELETION_RATIO = 0.5;
 var DESTRUCTIVE_MIN_LINES = 10;
 var DESTRUCTIVE_MIN_REMOVED = 5;
-var LARGE_FILE_LINES = 5e3;
-var NUL = String.fromCharCode(0);
-function lintProposal(proposal, stats, roots) {
-  const findings = [
-    ...lintTarget(proposal, roots),
-    ...lintDestructiveness(proposal, stats),
-    ...lintDiff(stats),
-    ...lintContentHygiene(proposal)
-  ];
-  return findings.sort((a, b) => weight(b.severity) - weight(a.severity));
-}
-function weight(severity) {
-  return severity === "blocker" ? 2 : severity === "warning" ? 1 : 0;
-}
-function lintTarget(proposal, roots) {
-  const { target } = proposal;
-  if (!target.absolute) {
-    return [
-      {
-        id: "path-unresolved",
-        rule: "path",
-        severity: "blocker",
-        message: `"${target.requested}" is not a path this server will write to.`,
-        detail: rejectionDetail(target, roots)
-      }
-    ];
-  }
-  const findings = [];
-  if (proposal.mode === "create" && target.exists) {
-    findings.push({
-      id: "create-exists",
-      rule: "path",
-      severity: "blocker",
-      message: `${target.display} already exists.`,
-      detail: "The proposal said this was a new file. Reopen it as an overwrite if that is what you want."
-    });
-  }
-  if (proposal.mode === "overwrite" && !target.exists) {
-    findings.push({
-      id: "overwrite-missing",
-      rule: "path",
-      severity: "warning",
-      message: `${target.display} does not exist yet \u2014 this will create it.`
-    });
-  }
-  if (target.requested.includes("..")) {
-    findings.push({
-      id: "path-traversal",
-      rule: "path",
-      severity: "info",
-      message: "The path contained `..` and was normalised before checking.",
-      detail: `Resolved to ${target.absolute}`
-    });
-  }
-  return findings;
-}
 function lintDestructiveness(proposal, stats) {
   const findings = [];
   const baselineLines = splitLines(proposal.baseline).length;
+  const acknowledged = proposal.destructiveAcknowledged;
   if (proposal.mode === "delete") {
     findings.push({
       id: "delete",
       rule: "destructive",
-      severity: proposal.destructiveAcknowledged ? "info" : "blocker",
+      severity: acknowledged ? "info" : "blocker",
       message: `This deletes ${proposal.target.display} (${baselineLines} lines).`,
-      detail: proposal.destructiveAcknowledged ? "Acknowledged." : "Tick the box below to allow it."
+      detail: acknowledged ? "Acknowledged." : "Tick the box below to allow it."
     });
     return findings;
   }
@@ -39419,21 +39328,23 @@ function lintDestructiveness(proposal, stats) {
     findings.push({
       id: "large-deletion",
       rule: "destructive",
-      severity: proposal.destructiveAcknowledged ? "info" : "blocker",
+      severity: acknowledged ? "info" : "blocker",
       message: `This removes ${stats.removed} of ${baselineLines} lines (${percent}%).`,
-      detail: proposal.destructiveAcknowledged ? "Acknowledged." : "Read the diff, then tick the box below the editor if you mean it."
+      detail: acknowledged ? "Acknowledged." : "Read the diff, then tick the box below the editor if you mean it."
     });
   }
   if (proposal.content.trim() === "" && baselineLines > 0) {
     findings.push({
       id: "emptied",
       rule: "destructive",
-      severity: proposal.destructiveAcknowledged ? "info" : "blocker",
+      severity: acknowledged ? "info" : "blocker",
       message: `This empties ${proposal.target.display}.`
     });
   }
   return findings;
 }
+
+// shared/lint/diff.ts
 function lintDiff(stats) {
   const findings = [];
   if (stats.truncated) {
@@ -39446,32 +39357,37 @@ function lintDiff(stats) {
     });
   }
   if (stats.newlineAtEofChanged) {
+    const alone = stats.added === 0 && stats.removed === 0;
     findings.push({
       id: "newline-at-eof",
       rule: "diff",
       severity: "info",
-      message: "Only the newline at the end of the file changes.",
-      detail: "No line differs, so the diff below has nothing to show \u2014 but the bytes on disk do change."
+      message: alone ? "Only the newline at the end of the file changes." : "The newline at the end of the file changes as well.",
+      detail: alone ? "No line differs, so the diff below has nothing to show \u2014 but the bytes on disk do change." : "The diff cannot show it: lines are compared without their terminators."
     });
   }
   return findings;
 }
+
+// shared/lint/hygiene.ts
+var LARGE_FILE_LINES = 5e3;
+var NUL = String.fromCharCode(0);
 function lintContentHygiene(proposal) {
   const findings = [];
   const { content, baseline, mode } = proposal;
   if (mode === "delete") return findings;
+  const hasCrlf = content.includes("\r\n");
+  const hasBareLf = /(?<!\r)\n/.test(content);
   if (content !== "" && !content.endsWith("\n")) {
+    const terminator = hasCrlf && !hasBareLf ? "\r\n" : "\n";
     findings.push({
       id: "no-final-newline",
       rule: "hygiene",
       severity: "info",
       message: "No trailing newline.",
-      fix: { label: "Add one", content: `${content}
-` }
+      fix: { label: "Add one", content: `${content}${terminator}` }
     });
   }
-  const hasCrlf = content.includes("\r\n");
-  const hasBareLf = /(?<!\r)\n/.test(content);
   if (hasCrlf && hasBareLf) {
     findings.push({
       id: "mixed-eol",
@@ -39558,6 +39474,90 @@ function dominantIndent(text) {
   if (spaces > tabs * 2) return "spaces";
   return null;
 }
+
+// shared/rejection.ts
+function rejectionDetail(target, roots) {
+  const reason = target.rejection ?? "unresolvable";
+  switch (reason) {
+    case "outside-roots":
+      return `It is outside the roots this editor will write to.
+Writable roots:
+${roots.map((r2) => `  ${r2}`).join("\n")}`;
+    case "denied":
+      return `It matches the deny list${target.deniedBy ? ` (${target.deniedBy})` : ""}, so this editor will not touch it even though it is inside a writable root. Start the server with --deny to choose your own patterns.`;
+    case "not-a-file":
+      return "It is a directory, not a file.";
+    case "too-large":
+      return "It is too large to review in an editor.";
+    case "unresolvable":
+    default:
+      return "It could not be resolved to a path on disk.";
+  }
+}
+function explainRejection(target, roots) {
+  return `Refused: "${target.requested}" \u2014 ${rejectionDetail(target, roots)}`;
+}
+
+// shared/lint/target.ts
+function lintTarget(proposal, roots) {
+  const { target } = proposal;
+  if (!target.absolute) {
+    return [
+      {
+        id: "path-unresolved",
+        rule: "path",
+        severity: "blocker",
+        message: `"${target.requested}" is not a path this server will write to.`,
+        detail: rejectionDetail(target, roots)
+      }
+    ];
+  }
+  const findings = [];
+  if (proposal.mode === "create" && target.exists) {
+    findings.push({
+      id: "create-exists",
+      rule: "path",
+      severity: "blocker",
+      message: `${target.display} already exists.`,
+      detail: "The proposal said this was a new file. Reopen it as an overwrite if that is what you want."
+    });
+  }
+  if (proposal.mode === "overwrite" && !target.exists) {
+    findings.push({
+      id: "overwrite-missing",
+      rule: "path",
+      severity: "warning",
+      message: `${target.display} does not exist yet \u2014 this will create it.`
+    });
+  }
+  if (climbs(target.requested)) {
+    findings.push({
+      id: "path-traversal",
+      rule: "path",
+      severity: "info",
+      message: "The path contained `..` and was normalised before checking.",
+      detail: `Resolved to ${target.absolute}`
+    });
+  }
+  return findings;
+}
+function climbs(path) {
+  return path.split(/[\\/]/).includes("..");
+}
+
+// shared/lint.ts
+function lintProposal(proposal, stats, roots) {
+  const findings = [
+    ...lintTarget(proposal, roots),
+    ...lintDestructiveness(proposal, stats),
+    ...lintDiff(stats),
+    ...lintContentHygiene(proposal)
+  ];
+  return findings.sort((a, b) => weight(b.severity) - weight(a.severity));
+}
+function weight(severity) {
+  return severity === "blocker" ? 2 : severity === "warning" ? 1 : 0;
+}
 function hasBlockers(findings) {
   return findings.some((f2) => f2.severity === "blocker");
 }
@@ -39579,12 +39579,34 @@ function composeState(proposal, context) {
   };
 }
 
+// src/pathSpelling.ts
+var FOLDS_CASE = process.platform === "win32" || process.platform === "darwin";
+function forCompare(p2, foldsCase) {
+  const slashed = p2.split("\\").join("/");
+  return foldsCase ? slashed.toLowerCase() : slashed;
+}
+function namesTarget(target, path, foldsCase = FOLDS_CASE) {
+  const wanted = forCompare(path, foldsCase);
+  if (forCompare(target.requested, foldsCase) === wanted) return true;
+  if (!target.absolute) return false;
+  const absolute = forCompare(target.absolute, foldsCase);
+  return absolute === wanted || absolute.endsWith(`/${wanted}`);
+}
+function sameTarget(a, b) {
+  return a.absolute !== null && a.absolute === b.absolute;
+}
+
+// src/store/records.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { readFile as readFile3, readdir, rename as rename2, rm as rm3, writeFile as writeFile2 } from "node:fs/promises";
+
 // src/store.ts
 import { createHash as createHash2 } from "node:crypto";
-import { mkdir as mkdir2, readFile as readFile3, readdir, rename as rename2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join as join2 } from "node:path";
+import { mkdir as mkdir2, rm as rm2 } from "node:fs/promises";
+import { tmpdir, userInfo } from "node:os";
+import { join as join3 } from "node:path";
 var SCHEMA = "v1";
+var KINDS = ["proposals", "locks", "tombstones"];
 var root;
 function storePathFor(identity) {
   const canonical = JSON.stringify({
@@ -39593,78 +39615,108 @@ function storePathFor(identity) {
     dryRun: identity.dryRun
   });
   const key = createHash2("sha256").update(canonical, "utf8").digest("hex").slice(0, 16);
-  return join2(tmpdir(), "mcp-interactive-editor", `${SCHEMA}-${key}`);
+  return join3(tmpdir(), `mcp-interactive-editor-${owner()}`, `${SCHEMA}-${key}`);
+}
+function owner() {
+  const uid = process.getuid?.();
+  if (uid !== void 0) return String(uid);
+  try {
+    return userInfo().username.replace(/[^A-Za-z0-9_-]/g, "_");
+  } catch {
+    return "user";
+  }
 }
 async function configureStore(at) {
   root = at;
-  await mkdir2(join2(at, "proposals"), { recursive: true, mode: 448 });
-  await mkdir2(join2(at, "locks"), { recursive: true, mode: 448 });
-  await mkdir2(join2(at, "tombstones"), { recursive: true, mode: 448 });
+  for (const kind of KINDS) {
+    await mkdir2(join3(at, kind), { recursive: true, mode: 448 });
+  }
 }
-function dir() {
+function storeDir(kind) {
   if (!root) throw new Error("The proposal store was used before it was configured.");
-  return root;
+  return join3(root, kind);
 }
-function fileFor(proposalId) {
-  return join2(dir(), "proposals", `${proposalId}.json`);
+function isProposalId(id) {
+  return /^[0-9a-f-]{36}$/i.test(id);
 }
+function recordPath(kind, id, suffix = "") {
+  if (!isProposalId(id)) throw new Error(`Not a proposal id: ${id}`);
+  return join3(storeDir(kind), `${id}${suffix}`);
+}
+
+// src/store/records.ts
+var RECORD_SUFFIX = ".json";
 async function readProposal(proposalId) {
-  if (!/^[0-9a-f-]{36}$/i.test(proposalId)) return void 0;
+  if (!isProposalId(proposalId)) return void 0;
   try {
-    return JSON.parse(await readFile3(fileFor(proposalId), "utf8"));
+    const raw = await readFile3(recordPath("proposals", proposalId, RECORD_SUFFIX), "utf8");
+    return JSON.parse(raw);
   } catch {
     return void 0;
   }
 }
 async function writeProposal(proposal) {
-  const target = fileFor(proposal.proposalId);
-  const temp = `${target}.${process.pid}.tmp`;
+  const target = recordPath("proposals", proposal.proposalId, RECORD_SUFFIX);
+  const temp = `${target}.${process.pid}.${randomUUID2()}.tmp`;
   await writeFile2(temp, JSON.stringify(proposal), { encoding: "utf8", mode: 384 });
   await rename2(temp, target);
 }
 async function allProposals() {
   let names;
   try {
-    names = await readdir(join2(dir(), "proposals"));
+    names = await readdir(storeDir("proposals"));
   } catch {
     return [];
   }
   const found = await Promise.all(
-    names.filter((n) => n.endsWith(".json")).map((n) => readProposal(n.slice(0, -".json".length)))
+    names.filter((n) => n.endsWith(RECORD_SUFFIX)).map((n) => readProposal(n.slice(0, -RECORD_SUFFIX.length)))
   );
   return found.filter((p2) => p2 !== void 0).sort((a, b) => a.createdAt - b.createdAt);
 }
 async function deleteProposal(proposalId) {
-  await rm2(fileFor(proposalId), { force: true });
+  await rm3(recordPath("proposals", proposalId, RECORD_SUFFIX), { force: true });
 }
-async function claimForCommit(proposalId) {
-  try {
-    await mkdir2(join2(dir(), "locks", proposalId), { mode: 448 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function releaseCommit(proposalId) {
-  await rm2(join2(dir(), "locks", proposalId), { recursive: true, force: true });
-}
+
+// src/store/tombstones.ts
+import { readFile as readFile4, readdir as readdir2, rm as rm4, stat as stat2, writeFile as writeFile3 } from "node:fs/promises";
+import { join as join4 } from "node:path";
+var TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1e3;
 async function writeTombstone(proposalId, resolution) {
-  await writeFile2(join2(dir(), "tombstones", proposalId), resolution, {
+  await writeFile3(recordPath("tombstones", proposalId), resolution, {
     encoding: "utf8",
     mode: 384
   });
 }
 async function readTombstone(proposalId) {
-  if (!/^[0-9a-f-]{36}$/i.test(proposalId)) return void 0;
+  if (!isProposalId(proposalId)) return void 0;
   try {
-    return await readFile3(join2(dir(), "tombstones", proposalId), "utf8");
+    return await readFile4(recordPath("tombstones", proposalId), "utf8");
   } catch {
     return void 0;
   }
 }
+async function pruneTombstones(now = Date.now()) {
+  const dir = storeDir("tombstones");
+  let names;
+  try {
+    names = await readdir2(dir);
+  } catch {
+    return;
+  }
+  await Promise.all(
+    names.map(async (name) => {
+      const path = join4(dir, name);
+      try {
+        const info = await stat2(path);
+        if (now - info.mtimeMs > TOMBSTONE_TTL_MS) await rm4(path, { force: true });
+      } catch {
+      }
+    })
+  );
+}
 
 // src/version.ts
-var SERVER_VERSION = "0.7.1";
+var SERVER_VERSION = "0.7.2";
 
 // src/proposals.ts
 var MAX_RETAINED = 32;
@@ -39676,7 +39728,7 @@ async function createProposal(guard, input2) {
     if (sameTarget(open2.target, target)) await resolveProposal(open2.proposalId, "superseded");
   }
   const proposal = {
-    proposalId: randomUUID2(),
+    proposalId: randomUUID3(),
     mode: input2.mode,
     target,
     content: input2.mode === "delete" ? "" : input2.content,
@@ -39744,26 +39796,12 @@ async function findOpenProposal(path) {
   if (resolved.length > 0) return resolved[resolved.length - 1];
   return open2.length === 1 ? open2[0] : void 0;
 }
-function sameTarget(a, b) {
-  return a.absolute !== null && a.absolute === b.absolute;
-}
-var foldsCase = process.platform === "win32" || process.platform === "darwin";
-function forCompare(p2) {
-  const slashed = p2.split("\\").join("/");
-  return foldsCase ? slashed.toLowerCase() : slashed;
-}
-function namesTarget(target, path) {
-  const wanted = forCompare(path);
-  if (forCompare(target.requested) === wanted) return true;
-  if (!target.absolute) return false;
-  const absolute = forCompare(target.absolute);
-  return absolute === wanted || absolute.endsWith(`/${wanted}`);
-}
 async function openProposals() {
   const cutoff = Date.now() - PROPOSAL_TTL_MS;
   return (await allProposals()).filter((p2) => !p2.resolvedAt && p2.createdAt >= cutoff);
 }
 async function evict() {
+  await pruneTombstones();
   const held = await allProposals();
   if (held.length <= MAX_RETAINED) return;
   const cutoff = Date.now() - PROPOSAL_TTL_MS;
@@ -39773,6 +39811,47 @@ async function evict() {
   for (const proposal of doomed) {
     if (!proposal.resolvedAt) await writeTombstone(proposal.proposalId, "superseded");
     await deleteProposal(proposal.proposalId);
+  }
+}
+
+// shared/unifiedDiff.ts
+var NO_NEWLINE_MARKER = "\\ No newline at end of file";
+function formatUnifiedDiff(hunks, label, sides) {
+  if (hunks.length === 0) return `(no changes to ${label})`;
+  const out = [`--- ${label} (on disk)`, `+++ ${label} (proposed)`];
+  const ends = sides ? fileEnds(sides) : null;
+  for (const hunk of hunks) {
+    const oldCount = hunk.lines.filter((l) => l.kind !== "add").length;
+    const newCount = hunk.lines.filter((l) => l.kind !== "remove").length;
+    out.push(`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`);
+    for (const entry of hunk.lines) {
+      out.push(markerFor(entry.kind) + entry.text);
+      if (ends && isUnterminatedEnd(entry, ends)) out.push(NO_NEWLINE_MARKER);
+    }
+  }
+  return out.join("\n");
+}
+function markerFor(kind) {
+  return kind === "add" ? "+" : kind === "remove" ? "-" : " ";
+}
+function fileEnds(sides) {
+  return {
+    oldLast: countLines(sides.before),
+    oldTerminated: endsWithNewline(sides.before),
+    newLast: countLines(sides.after),
+    newTerminated: endsWithNewline(sides.after)
+  };
+}
+function isUnterminatedEnd(entry, ends) {
+  const endsOld = entry.oldLine === ends.oldLast && !ends.oldTerminated;
+  const endsNew = entry.newLine === ends.newLast && !ends.newTerminated;
+  switch (entry.kind) {
+    case "remove":
+      return endsOld;
+    case "add":
+      return endsNew;
+    case "equal":
+      return endsOld && endsNew;
   }
 }
 
@@ -39790,6 +39869,9 @@ function handleFor(state) {
 }
 function outcomeDescription(context) {
   return context.blockOnReview ? "It does not return until the human acts: either they accept it and the result is a receipt for what landed, or they comment on it, which is a rejection \u2014 nothing is written and the result carries what they want changed, for you to redraft." : "It returns as soon as the panel is open, so the result is the diff rather than the verdict. The outcome arrives separately: a receipt if they saved, or their comments quoted against the lines they are about. Comments mean the draft was declined and nothing was written, so redraft from what they said rather than re-proposing.";
+}
+function serverInstructions(context) {
+  return "propose_write opens an editable review panel: the human gets a live diff against disk, edits your draft in place, and either saves it or comments on it. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves.\n\n" + outcomeDescription(context);
 }
 function openerResult(state) {
   const refused = !state.proposal.target.absolute;
@@ -39842,8 +39924,8 @@ function describeState(state) {
 function diffForModel(state) {
   const { proposal } = state;
   const full = formatUnifiedDiff(state.diff, proposal.target.display, {
-    before: endsWithNewline(proposal.baseline),
-    after: endsWithNewline(proposedContent(proposal))
+    before: proposal.baseline,
+    after: proposedContent(proposal)
   });
   const lines = full.split("\n");
   if (lines.length <= MODEL_DIFF_LINE_BUDGET && full.length <= MODEL_DIFF_CHAR_BUDGET) return full;
@@ -40086,6 +40168,36 @@ function registerEditorUpdate(server, { guard }) {
       return panelResult(buildEditorState(guard, next), "Updated.");
     }
   );
+}
+
+// src/store/claims.ts
+import { mkdir as mkdir3, rm as rm5, stat as stat3 } from "node:fs/promises";
+var STALE_CLAIM_MS = 6e4;
+async function claimForCommit(proposalId) {
+  const lock = recordPath("locks", proposalId);
+  if (await take(lock)) return true;
+  if (!await isStale2(lock)) return false;
+  await rm5(lock, { recursive: true, force: true });
+  return take(lock);
+}
+async function releaseCommit(proposalId) {
+  await rm5(recordPath("locks", proposalId), { recursive: true, force: true });
+}
+async function take(lock) {
+  try {
+    await mkdir3(lock, { mode: 448 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function isStale2(lock) {
+  try {
+    const info = await stat3(lock);
+    return Date.now() - info.mtimeMs > STALE_CLAIM_MS;
+  } catch {
+    return false;
+  }
 }
 
 // src/tools/commit.ts
@@ -40399,7 +40511,12 @@ var ENDPOINT = "/mcp";
 function serveHttp(options) {
   const sessions = /* @__PURE__ */ new Map();
   const http = createServer((req, res) => {
-    void handle(req, res, sessions, options);
+    handle(req, res, sessions, options).catch((cause) => {
+      process.stderr.write(`interactive-editor: request failed: ${describe3(cause)}
+`);
+      if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" });
+      res.end("The server could not handle that request.\n");
+    });
   });
   return new Promise((resolve4, reject) => {
     http.once("error", (cause) => {
@@ -40438,7 +40555,7 @@ async function handle(req, res, sessions, options) {
 }
 async function openSession(req, res, sessions, options) {
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID3(),
+    sessionIdGenerator: () => randomUUID4(),
     onsessioninitialized: (id) => {
       sessions.set(id, transport);
     }
@@ -40455,6 +40572,7 @@ async function openSession(req, res, sessions, options) {
   await transport.handleRequest(req, res);
 }
 function applyCors(req, res, allowed) {
+  res.setHeader("vary", "origin");
   const origin = header(req, "origin");
   if (!origin || !allowed.includes(origin)) return;
   res.setHeader("access-control-allow-origin", origin);
@@ -40469,44 +40587,24 @@ function header(req, name) {
   const value = req.headers[name];
   return Array.isArray(value) ? value[0] : value;
 }
+function describe3(cause) {
+  return cause instanceof Error ? cause.message : String(cause);
+}
 
 // src/server.ts
 async function main() {
-  let cli;
-  try {
-    cli = parseArgs(process.argv.slice(2));
-  } catch (error61) {
-    process.stderr.write(`${error61.message}
-
-${HELP}`);
-    process.exit(2);
-  }
-  if (cli.help) {
-    process.stdout.write(HELP);
-    process.exit(0);
-  }
-  if (cli.roots.length === 0) {
-    process.stderr.write(`No --root given.
-
-${HELP}`);
-    process.exit(2);
-  }
+  const cli = readCommandLine();
   const guard = new FsGuard({ roots: cli.roots, deny: cli.deny, dryRun: cli.dryRun });
   await configureStore(storePathFor({ roots: guard.roots, deny: cli.deny, dryRun: cli.dryRun }));
-  const commitVisibility = cli.terminalApproval ? ["model", "app"] : ["app"];
   const toolOptions = {
-    commitVisibility,
+    commitVisibility: cli.terminalApproval ? ["model", "app"] : ["app"],
     terminalApproval: cli.terminalApproval,
     blockOnReview: cli.blockOnReview,
     ...cli.reviewTimeoutMs !== void 0 ? { reviewTimeoutMs: cli.reviewTimeoutMs } : {},
     ...cli.reviewGraceMs !== void 0 ? { reviewGraceMs: cli.reviewGraceMs } : {}
   };
-  const instructions = "propose_write opens an editable review panel: the human gets a live diff against disk, edits your draft in place, and either saves it or comments on it. Reach for it when a write is worth a second pair of eyes, and open_file when they would rather write the change themselves.\n\nIt returns as soon as the panel is open. The outcome reaches you separately: a receipt if they saved, or their comments quoted against the lines they are about. Comments mean the draft was declined \u2014 nothing was written, so redraft from what they said rather than re-proposing the same content.\n\nStarted with --block-on-review, the call instead waits and its own result is the outcome.";
-  process.stderr.write(
-    `interactive-editor ready. Roots:
-${guard.roots.map((r2) => `  ${r2}`).join("\n")}
-` + (guard.dryRun ? "DRY RUN: no writes will reach disk.\n" : "") + (cli.terminalApproval ? "TERMINAL APPROVAL: the commit tool is exposed to the agent. Your client's\napprove/deny prompt is the only gate \u2014 do not allowlist that tool.\n" : "")
-  );
+  const instructions = serverInstructions(cli);
+  process.stderr.write(banner(guard, cli));
   if (cli.http) {
     await serveHttp({
       port: cli.httpPort,
@@ -40529,6 +40627,33 @@ ${cli.allowedOrigins.map((o) => `  ${o}`).join("\n")}
   );
   registerTools(server, guard, toolOptions);
   await server.connect(new StdioServerTransport());
+}
+function readCommandLine() {
+  let cli;
+  try {
+    cli = parseArgs(process.argv.slice(2));
+  } catch (error61) {
+    process.stderr.write(`${error61.message}
+
+${HELP}`);
+    process.exit(2);
+  }
+  if (cli.help) {
+    process.stdout.write(HELP);
+    process.exit(0);
+  }
+  if (cli.roots.length === 0) {
+    process.stderr.write(`No --root given.
+
+${HELP}`);
+    process.exit(2);
+  }
+  return cli;
+}
+function banner(guard, cli) {
+  return `interactive-editor ready. Roots:
+${guard.roots.map((r2) => `  ${r2}`).join("\n")}
+` + (guard.dryRun ? "DRY RUN: no writes will reach disk.\n" : "") + (cli.terminalApproval ? "TERMINAL APPROVAL: the commit tool is exposed to the agent. Your client's\napprove/deny prompt is the only gate \u2014 do not allowlist that tool.\n" : "");
 }
 main().catch((error61) => {
   process.stderr.write(`interactive-editor failed to start: ${error61.message}
